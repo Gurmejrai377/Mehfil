@@ -1,333 +1,438 @@
 package com.example.data
 
+import android.content.Context
+import android.util.Log
+import com.example.R
+import com.google.firebase.Firebase
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
-class MehfilRepository(private val dao: MehfilDao) {
-
-    fun observeActiveUser(): Flow<UserAccount?> = dao.observeActiveUser()
-
-    fun observeUserAccount(userId: String): Flow<UserAccount?> = dao.observeUserById(userId)
-
-    fun observeContacts(userId: String): Flow<List<Contact>> = dao.observeContacts(userId)
-
-    fun observeChats(userId: String): Flow<List<Chat>> = dao.observeChats(userId)
-
-    fun observeMessages(chatId: String): Flow<List<ChatMessage>> = dao.observeMessages(chatId)
-
-    fun observeCalls(userId: String): Flow<List<CallRecord>> = dao.observeCalls(userId)
-
-    fun observeStories(): Flow<List<Story>> = dao.observeStories()
-
-    // Party Rooms
-    fun observePartyRooms(): Flow<List<PartyRoom>> = dao.observePartyRooms()
-
-    fun observePartyRoom(roomId: String): Flow<PartyRoom?> = dao.observePartyRoom(roomId)
-
-    fun observeRoomSeats(roomId: String): Flow<List<RoomSeat>> = dao.observeRoomSeats(roomId)
-
-    fun observeRoomMessages(roomId: String): Flow<List<RoomMessage>> = dao.observeRoomMessages(roomId)
-
-    fun observeRoomSongs(roomId: String): Flow<List<RoomSongRequest>> = dao.observeRoomSongs(roomId)
-
-    suspend fun loginAsGuest(customName: String): Result<UserAccount> = try {
-        val cleanName = customName.trim().ifBlank { "Mehfil Guest" }.take(60)
-        val userId = "guest_${UUID.randomUUID().toString().replace("-", "").take(10)}"
-        val mehfilId = "mehfil_${userId.takeLast(6)}"
-        val now = System.currentTimeMillis()
-        dao.clearActiveSessions()
-        val account = UserAccount(
-            userId = userId,
-            displayName = cleanName,
-            phoneNumber = null,
-            loginMode = LoginMode.GUEST.name,
-            mehfilId = mehfilId,
-            bio = "Yahan har baat ek Mehfil hai",
-            online = true,
-            lowDataMode = false,
-            isActiveSession = true,
-            createdAt = now,
-            updatedAt = now
+class MehfilRepository(
+    private val db: FirebaseFirestore,
+    private val auth: FirebaseAuth = Firebase.auth
+) {
+    constructor(context: Context) : this(
+        FirebaseFirestore.getInstance(
+            context.applicationContext.getString(R.string.firestore_database_id)
         )
-        dao.upsertUser(account)
-        seedStarterCircleIfEmpty(account)
-        seedStarterRoomsIfEmpty()
-        Result.success(account)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    )
+
+    private fun requireUserId(): String =
+        auth.currentUser?.uid
+            ?: throw IllegalStateException("User must be signed in with Google before accessing Mehfil.")
+
+    private fun sanitizeId(raw: String): String =
+        raw.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").ifBlank { "id" }
+
+    fun directChatId(uid1: String, uid2: String): String {
+        val a = sanitizeId(uid1)
+        val b = sanitizeId(uid2)
+        val combined = if (a <= b) "dm_${a}_$b" else "dm_${b}_$a"
+        return combined.take(128)
     }
 
-    suspend fun loginWithPhoneOtp(phoneNumber: String, customName: String): Result<UserAccount> = try {
-        val digits = phoneNumber.filter { it.isDigit() || it == '+' }.take(20)
-        require(digits.count { it.isDigit() } >= 6) { "Enter a valid phone number." }
-        val userId = "phone_${digits.filter { it.isDigit() }}"
-        dao.clearActiveSessions()
-        val existing = dao.getUserById(userId)
-        val now = System.currentTimeMillis()
-        val account = if (existing != null) {
-            existing.copy(
-                displayName = customName.trim().takeIf { it.isNotBlank() }?.take(60) ?: existing.displayName,
-                online = true,
-                isActiveSession = true,
-                updatedAt = now
-            )
-        } else {
-            val cleanName = customName.trim().ifBlank { "Mehfil Member" }.take(60)
-            UserAccount(
-                userId = userId,
-                displayName = cleanName,
-                phoneNumber = digits,
-                loginMode = LoginMode.PHONE.name,
-                mehfilId = "mehfil_${digits.takeLast(6)}",
-                bio = "Yahan har baat ek Mehfil hai",
-                online = true,
-                lowDataMode = false,
-                isActiveSession = true,
-                createdAt = now,
-                updatedAt = now
-            )
+    private fun <T> guardedSnapshotFlow(
+        path: String,
+        op: OperationType,
+        expectedUid: String? = null,
+        flowFactory: () -> Flow<T>
+    ): Flow<T> = flow {
+        val activeUid = expectedUid ?: requireUserId()
+        emitAll(
+            flowFactory().catch { error ->
+                val unwrapped = unwrapFirestoreError(error)
+                if (unwrapped is CancellationException) throw unwrapped
+                if (auth.currentUser?.uid == activeUid) {
+                    handleFirestoreError(unwrapped, op, path)
+                }
+                throw unwrapped
+            }
+        )
+    }
+
+    fun observeUserAccount(userId: String): Flow<UserAccount?> =
+        guardedSnapshotFlow("users/$userId", OperationType.GET, userId) {
+            db.collection("users").document(userId)
+                .snapshots()
+                .map { it.toObject(UserAccount::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
         }
-        dao.upsertUser(account)
-        seedStarterCircleIfEmpty(account)
-        seedStarterRoomsIfEmpty()
-        Result.success(account)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+
+    fun observeDiscoverableProfiles(): Flow<List<PublicProfile>> =
+        guardedSnapshotFlow("profiles", OperationType.LIST) {
+            db.collection("profiles")
+                .whereEqualTo("discoverable", true)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(PublicProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedWith(compareByDescending<PublicProfile> { it.online }.thenBy { it.displayName.lowercase() })
+                }
+        }
+
+    fun observeContacts(userId: String): Flow<List<Contact>> =
+        guardedSnapshotFlow("users/$userId/contacts", OperationType.LIST, userId) {
+            db.collection("users").document(userId).collection("contacts")
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(Contact::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedWith(compareByDescending<Contact> { it.favorite }.thenBy { it.displayName.lowercase() })
+                }
+        }
+
+    fun observeChats(userId: String): Flow<List<Chat>> =
+        guardedSnapshotFlow("chats", OperationType.LIST, userId) {
+            db.collection("chats")
+                .whereArrayContains("participantUids", userId)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(Chat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedWith(
+                            compareByDescending<Chat> { it.pinned }
+                                .thenByDescending { it.updatedAt ?: Timestamp(0, 0) }
+                        )
+                }
+        }
+
+    fun observeMessages(chatId: String, userId: String): Flow<List<ChatMessage>> =
+        guardedSnapshotFlow("chats/$chatId/messages", OperationType.LIST, userId) {
+            db.collection("chats").document(chatId).collection("messages")
+                .whereArrayContains("participantUids", userId)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(ChatMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(0, 0) }
+                }
+        }
+
+    fun observeCalls(userId: String): Flow<List<CallRecord>> =
+        guardedSnapshotFlow("calls", OperationType.LIST, userId) {
+            db.collection("calls")
+                .whereArrayContains("participantUids", userId)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(CallRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+        }
+
+    fun observeCall(callId: String, userId: String): Flow<CallRecord?> =
+        guardedSnapshotFlow("calls/$callId", OperationType.GET, userId) {
+            db.collection("calls").document(callId)
+                .snapshots()
+                .map { it.toObject(CallRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
+        }
+
+    fun observeCallCandidates(callId: String, userId: String): Flow<List<CallCandidate>> =
+        guardedSnapshotFlow("calls/$callId/candidates", OperationType.LIST, userId) {
+            db.collection("calls").document(callId).collection("candidates")
+                .whereArrayContains("participantUids", userId)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(CallCandidate::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+        }
+
+    fun observeStories(): Flow<List<Story>> =
+        guardedSnapshotFlow("stories", OperationType.LIST) {
+            db.collection("stories")
+                .whereEqualTo("discoverable", true)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(Story::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.updatedAt ?: Timestamp(0, 0) }
+                }
+        }
+
+    fun observePartyRooms(): Flow<List<PartyRoom>> =
+        guardedSnapshotFlow("rooms", OperationType.LIST) {
+            db.collection("rooms")
+                .whereEqualTo("publicRoom", true)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(PartyRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedWith(
+                            compareByDescending<PartyRoom> { it.viewerCount }
+                                .thenByDescending { it.updatedAt ?: Timestamp(0, 0) }
+                        )
+                }
+        }
+
+    fun observePartyRoom(roomId: String): Flow<PartyRoom?> =
+        guardedSnapshotFlow("rooms/$roomId", OperationType.GET) {
+            db.collection("rooms").document(roomId)
+                .snapshots()
+                .map { it.toObject(PartyRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
+        }
+
+    fun observeRoomSeats(roomId: String): Flow<List<RoomSeat>> =
+        guardedSnapshotFlow("rooms/$roomId/seats", OperationType.LIST) {
+            db.collection("rooms").document(roomId).collection("seats")
+                .whereEqualTo("publicRoom", true)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(RoomSeat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.seatIndex }
+                }
+        }
+
+    fun observeRoomMessages(roomId: String): Flow<List<RoomMessage>> =
+        guardedSnapshotFlow("rooms/$roomId/messages", OperationType.LIST) {
+            db.collection("rooms").document(roomId).collection("messages")
+                .whereEqualTo("publicRoom", true)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(RoomMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(0, 0) }
+                }
+        }
+
+    fun observeRoomSongs(roomId: String): Flow<List<RoomSongRequest>> =
+        guardedSnapshotFlow("rooms/$roomId/songs", OperationType.LIST) {
+            db.collection("rooms").document(roomId).collection("songs")
+                .whereEqualTo("publicRoom", true)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(RoomSongRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedWith(
+                            compareByDescending<RoomSongRequest> { it.playing }
+                                .thenBy { it.createdAt ?: Timestamp(0, 0) }
+                        )
+                }
+        }
+
+    fun observeRoomSignals(roomId: String, userId: String): Flow<List<RoomSignal>> =
+        guardedSnapshotFlow("rooms/$roomId/signals", OperationType.LIST, userId) {
+            db.collection("rooms").document(roomId).collection("signals")
+                .whereArrayContains("participantUids", userId)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(RoomSignal::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(0, 0) }
+                }
+        }
+
+    suspend fun ensureUserProfileAndCircle(
+        displayNameHint: String? = null,
+        emailHint: String? = null
+    ): Result<UserAccount> {
+        var path = "users"
+        return try {
+            val user = auth.currentUser
+                ?: throw IllegalStateException("User must be signed in with Google.")
+            val uid = user.uid
+            val userRef = db.collection("users").document(uid)
+            val profileRef = db.collection("profiles").document(uid)
+            path = userRef.path
+
+            val existingSnap = userRef.get().await()
+            val resolvedName = (displayNameHint ?: user.displayName ?: user.email?.substringBefore("@"))
+                ?.trim()?.take(60)?.ifBlank { "Mehfil Member" } ?: "Mehfil Member"
+            val resolvedEmail = (emailHint ?: user.email)?.trim()?.take(120)?.takeIf { it.isNotEmpty() }
+            val defaultMehfilId = "mehfil_${uid.lowercase().replace(Regex("[^a-z0-9]"), "").takeLast(6).padStart(4, 'm')}"
+
+            val account: UserAccount
+            if (!existingSnap.exists()) {
+                val payload = mapOf<String, Any?>(
+                    "userId" to uid,
+                    "displayName" to resolvedName,
+                    "email" to resolvedEmail,
+                    "mehfilId" to defaultMehfilId,
+                    "bio" to "Yahan har baat ek Mehfil hai",
+                    "online" to true,
+                    "lowDataMode" to false,
+                    "coinBalance" to 5000L,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ).filterValues { it != null }
+                userRef.set(payload).await()
+
+                val profilePayload = mapOf(
+                    "userId" to uid,
+                    "displayName" to resolvedName,
+                    "mehfilId" to defaultMehfilId,
+                    "statusText" to "Available on Mehfil",
+                    "avatarColorHex" to "#6E2CF2",
+                    "online" to true,
+                    "discoverable" to true,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                profileRef.set(profilePayload).await()
+
+                seedPersonalWelcome(uid, resolvedName, defaultMehfilId)
+                account = UserAccount(
+                    id = uid,
+                    userId = uid,
+                    displayName = resolvedName,
+                    email = resolvedEmail,
+                    mehfilId = defaultMehfilId,
+                    bio = "Yahan har baat ek Mehfil hai",
+                    online = true,
+                    lowDataMode = false,
+                    coinBalance = 5000L
+                )
+            } else {
+                val parsed = existingSnap.toObject(UserAccount::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                val finalName = parsed?.displayName?.ifBlank { resolvedName } ?: resolvedName
+                val finalMehfilId = parsed?.mehfilId?.ifBlank { defaultMehfilId } ?: defaultMehfilId
+                val finalBio = parsed?.bio ?: "Yahan har baat ek Mehfil hai"
+
+                val profileSnap = profileRef.get().await()
+                if (!profileSnap.exists()) {
+                    profileRef.set(
+                        mapOf(
+                            "userId" to uid,
+                            "displayName" to finalName,
+                            "mehfilId" to finalMehfilId,
+                            "statusText" to finalBio.take(120),
+                            "avatarColorHex" to "#6E2CF2",
+                            "online" to true,
+                            "discoverable" to true,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } else {
+                    profileRef.update(
+                        mapOf(
+                            "online" to true,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+                userRef.update(
+                    mapOf(
+                        "online" to true,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                account = parsed ?: UserAccount(
+                    id = uid,
+                    userId = uid,
+                    displayName = finalName,
+                    email = resolvedEmail,
+                    mehfilId = finalMehfilId,
+                    bio = finalBio
+                )
+            }
+
+            seedStarterRoomsIfEmpty(uid, account.displayName)
+            Result.success(account)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
     }
 
-    suspend fun signOut(): Result<Unit> = try {
-        dao.clearActiveSessions()
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    private suspend fun seedPersonalWelcome(uid: String, displayName: String, mehfilId: String) {
+        try {
+            val studioContactRef = db.collection("users").document(uid)
+                .collection("contacts").document("mehfil_studio")
+            if (!studioContactRef.get().await().exists()) {
+                studioContactRef.set(
+                    mapOf(
+                        "userId" to uid,
+                        "peerId" to "mehfil_studio",
+                        "displayName" to "Mehfil Studio",
+                        "mehfilId" to "mehfil_studio",
+                        "statusText" to "Live Camera, Mic & Audio Self-Check",
+                        "avatarColorHex" to "#6E2CF2",
+                        "online" to true,
+                        "favorite" to true,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+
+            val studioChatId = directChatId(uid, "mehfil_studio")
+            val chatRef = db.collection("chats").document(studioChatId)
+            val batch = db.batch()
+            if (!chatRef.get().await().exists()) {
+                batch.set(
+                    chatRef,
+                    mapOf(
+                        "participantUids" to listOf(uid, "mehfil_studio"),
+                        "participantNames" to mapOf(uid to displayName, "mehfil_studio" to "Mehfil Studio"),
+                        "chatKind" to ChatKind.DIRECT.name,
+                        "title" to "Mehfil Studio",
+                        "lastMessageText" to "Welcome to Mehfil! Add friends from Mehfil Circle or join a Party Room.",
+                        "lastMessageType" to MessageType.TEXT.name,
+                        "lastMessageSenderId" to uid,
+                        "unreadCount" to 0L,
+                        "pinned" to true,
+                        "muted" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                val welcomeMsgRef = chatRef.collection("messages").document("msg_welcome")
+                batch.set(
+                    welcomeMsgRef,
+                    mapOf(
+                        "chatId" to studioChatId,
+                        "senderId" to uid,
+                        "senderName" to displayName,
+                        "participantUids" to listOf(uid, "mehfil_studio"),
+                        "messageType" to MessageType.TEXT.name,
+                        "text" to "Mehfil activated for $displayName ($mehfilId)! Send voice notes, photos, or start an HD WebRTC call.",
+                        "mediaDurationSec" to 0L,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                batch.commit().await()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("MehfilRepo", "Personal welcome seed skipped: ${e.message}")
+        }
     }
 
-    private suspend fun seedStarterCircleIfEmpty(user: UserAccount) {
-        if (dao.getContactCount(user.userId) > 0) return
-        val now = System.currentTimeMillis()
-        val studioPeerId = "mehfil_studio"
-        dao.upsertContact(
-            Contact(
-                id = "${user.userId}_$studioPeerId",
-                userId = user.userId,
-                peerId = studioPeerId,
-                displayName = "Mehfil Studio",
-                mehfilId = "mehfil_studio",
-                statusText = "HD Video, Party Rooms & Audio Studio",
-                avatarColorHex = "#6E2CF2",
-                online = true,
-                favorite = true,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
+    suspend fun seedStarterRoomsIfEmpty(hostUid: String? = null, hostName: String? = null) {
+        try {
+            val uid = hostUid ?: requireUserId()
+            val resolvedHost = hostName?.takeIf { it.isNotBlank() } ?: "Mehfil Host"
+            val existing = db.collection("rooms")
+                .whereEqualTo("publicRoom", true)
+                .limit(1)
+                .get()
+                .await()
+            if (!existing.isEmpty) return
 
-        val chatId = "chat_${user.userId}_$studioPeerId"
-        dao.upsertChat(
-            Chat(
-                id = chatId,
-                ownerUserId = user.userId,
-                peerId = studioPeerId,
-                peerName = "Mehfil Studio",
-                chatKind = ChatKind.DIRECT.name,
-                lastMessageText = "Yahan har baat ek Mehfil hai — join a Party Room!",
-                lastMessageType = MessageType.TEXT.name,
-                lastMessageSenderId = studioPeerId,
-                unreadCount = 0L,
-                pinned = true,
-                muted = false,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
-
-        dao.insertMessage(
-            ChatMessage(
-                id = "msg_welcome_${user.userId}",
-                chatId = chatId,
-                senderId = studioPeerId,
-                senderName = "Mehfil Studio",
-                messageType = MessageType.TEXT.name,
-                text = "Welcome to Mehfil! Yahan har baat ek Mehfil hai. Explore the new Rooms tab for Music, Party, Voice Chat, and Live stages.",
-                mediaDurationSec = 0L,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
-
-        dao.upsertStory(
-            Story(
-                id = "story_welcome_${user.userId}",
-                ownerId = user.userId,
-                ownerName = user.displayName,
-                caption = "Yahan har baat ek Mehfil hai ✨",
-                moodEmoji = "🎤",
-                accentHex = "#6E2CF2",
-                viewCount = 0L,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
-    }
-
-    suspend fun seedStarterRoomsIfEmpty() {
-        if (dao.getPartyRoomCount() > 0) return
-        val now = System.currentTimeMillis()
-
-        val starterRooms = listOf(
-            PartyRoom(
-                id = "room_music_mehfil",
+            createPartyRoom(
                 name = "Sufi & Bollywood DJ Night",
-                roomType = RoomType.MUSIC.name,
-                hostId = "host_dj_aarav",
-                hostName = "DJ Aarav",
-                topic = "Request tracks & sing together on stage",
-                viewerCount = 342L,
-                currentSongTitle = "Kesariya Royal Lo-Fi • DJ Aarav",
-                isMusicPlaying = true,
-                hostMicOn = true,
-                totalGiftCoins = 4850L,
-                createdAt = now - 4000L,
-                updatedAt = now
-            ),
-            PartyRoom(
-                id = "room_party_royal",
+                roomType = RoomType.MUSIC,
+                hostId = uid,
+                hostName = resolvedHost,
+                topic = "Live DJ beats, song requests & 8-mic stage"
+            )
+            createPartyRoom(
                 name = "Royal Gold Mehfil Club",
-                roomType = RoomType.PARTY.name,
-                hostId = "host_zoya_vip",
-                hostName = "Zoya Khan",
-                topic = "8 mics open • VIP gifts & nonstop fun",
-                viewerCount = 518L,
-                currentSongTitle = "Mehfil Ambient Beat",
-                isMusicPlaying = false,
-                hostMicOn = true,
-                totalGiftCoins = 9240L,
-                createdAt = now - 3000L,
-                updatedAt = now - 100L
-            ),
-            PartyRoom(
-                id = "room_chat_shayari",
-                name = "Late Night Chai & Shayari",
-                roomType = RoomType.CHAT.name,
-                hostId = "host_kabir",
-                hostName = "Kabir Sharma",
-                topic = "Voice chat only • Share stories & poetry",
-                viewerCount = 164L,
-                currentSongTitle = "",
-                isMusicPlaying = false,
-                hostMicOn = true,
-                totalGiftCoins = 1520L,
-                createdAt = now - 2000L,
-                updatedAt = now - 200L
-            ),
-            PartyRoom(
-                id = "room_live_mehfil",
-                name = "Mehfil Live Spotlight Show",
-                roomType = RoomType.LIVE.name,
-                hostId = "host_ananya",
-                hostName = "Ananya Verma",
-                topic = "Host live broadcast • Ask anything!",
-                viewerCount = 790L,
-                currentSongTitle = "Spotlight Intro Theme",
-                isMusicPlaying = true,
-                hostMicOn = true,
-                totalGiftCoins = 12400L,
-                createdAt = now - 1000L,
-                updatedAt = now - 300L
+                roomType = RoomType.PARTY,
+                hostId = uid,
+                hostName = resolvedHost,
+                topic = "8 live mics open • Gifts, reactions & voice chat"
             )
-        )
-
-        val coHostSamples = listOf(
-            Triple("peer_rohan", "Rohan", "#6E2CF2"),
-            Triple("peer_meera", "Meera", "#9D4EDD"),
-            Triple("peer_sana", "Sana", "#D4AF37"),
-            Triple("peer_aryan", "Aryan", "#5B1FA6")
-        )
-
-        starterRooms.forEach { room ->
-            dao.upsertPartyRoom(room)
-            val seats = (0 until 8).map { idx ->
-                val sample = if (idx < 3) coHostSamples[idx] else null
-                RoomSeat(
-                    id = "${room.id}_seat_$idx",
-                    roomId = room.id,
-                    seatIndex = idx,
-                    occupantId = sample?.first,
-                    occupantName = sample?.second,
-                    avatarColorHex = sample?.third ?: "#6E2CF2",
-                    isMuted = idx == 2,
-                    giftCoins = if (sample != null) (idx + 1) * 120L else 0L,
-                    lastReaction = if (idx == 0) "🎤" else null,
-                    updatedAt = now
-                )
-            }
-            dao.upsertRoomSeats(seats)
-
-            dao.insertRoomMessage(
-                RoomMessage(
-                    id = "rmsg_welcome_${room.id}",
-                    roomId = room.id,
-                    senderId = room.hostId,
-                    senderName = room.hostName,
-                    kind = RoomMessageKind.SYSTEM.name,
-                    text = "Welcome to ${room.name}! Tap an empty mic seat to join the circle.",
-                    createdAt = now - 5000L
-                )
-            )
-            dao.insertRoomMessage(
-                RoomMessage(
-                    id = "rmsg_chat1_${room.id}",
-                    roomId = room.id,
-                    senderId = "peer_rohan",
-                    senderName = "Rohan",
-                    kind = RoomMessageKind.TEXT.name,
-                    text = "Yahan har baat ek Mehfil hai! Loving the vibe tonight.",
-                    createdAt = now - 2500L
-                )
-            )
-
-            if (room.roomType == RoomType.MUSIC.name || room.roomType == RoomType.LIVE.name) {
-                dao.upsertRoomSong(
-                    RoomSongRequest(
-                        id = "song_1_${room.id}",
-                        roomId = room.id,
-                        title = "Kesariya Royal Lo-Fi",
-                        artist = "DJ Aarav",
-                        requestedBy = room.hostName,
-                        isPlaying = true,
-                        createdAt = now - 4000L
-                    )
-                )
-                dao.upsertRoomSong(
-                    RoomSongRequest(
-                        id = "song_2_${room.id}",
-                        roomId = room.id,
-                        title = "Tere Bina Mehfil",
-                        artist = "Mehfil Acoustic",
-                        requestedBy = "Meera",
-                        isPlaying = false,
-                        createdAt = now - 3000L
-                    )
-                )
-                dao.upsertRoomSong(
-                    RoomSongRequest(
-                        id = "song_3_${room.id}",
-                        roomId = room.id,
-                        title = "Raataan Lambiyan Remix",
-                        artist = "Club Mehfil",
-                        requestedBy = "Rohan",
-                        isPlaying = false,
-                        createdAt = now - 2000L
-                    )
-                )
-            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("MehfilRepo", "Starter rooms check skipped: ${e.message}")
         }
     }
 
@@ -337,74 +442,171 @@ class MehfilRepository(private val dao: MehfilDao) {
         hostId: String,
         hostName: String,
         topic: String
-    ): Result<String> = try {
-        val cleanName = name.trim().take(60)
-        require(cleanName.isNotEmpty()) { "Room name cannot be empty." }
-        val now = System.currentTimeMillis()
-        val roomId = "room_${UUID.randomUUID().toString().replace("-", "").take(12)}"
-        val defaultSong = if (roomType == RoomType.MUSIC) "Mehfil DJ Opening Mix • $hostName" else ""
-        val room = PartyRoom(
-            id = roomId,
-            name = cleanName,
-            roomType = roomType.name,
-            hostId = hostId,
-            hostName = hostName.ifBlank { "Mehfil Host" },
-            topic = topic.trim().ifBlank { roomType.description }.take(120),
-            viewerCount = 1L,
-            currentSongTitle = defaultSong,
-            isMusicPlaying = roomType == RoomType.MUSIC,
-            hostMicOn = true,
-            totalGiftCoins = 0L,
-            createdAt = now,
-            updatedAt = now
-        )
-        dao.upsertPartyRoom(room)
+    ): Result<String> {
+        var docPath = "rooms"
+        return try {
+            val uid = requireUserId()
+            check(uid == hostId) { "Authenticated user mismatch." }
+            val cleanName = name.trim().take(60)
+            require(cleanName.isNotEmpty()) { "Room name cannot be empty." }
+            val cleanHostName = hostName.trim().ifBlank { "Mehfil Host" }.take(60)
+            val cleanTopic = topic.trim().ifBlank { roomType.description }.take(120)
+            val roomId = "room_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+            val roomRef = db.collection("rooms").document(roomId)
+            docPath = roomRef.path
 
-        val seats = (0 until 8).map { idx ->
-            RoomSeat(
-                id = "${roomId}_seat_$idx",
-                roomId = roomId,
-                seatIndex = idx,
-                occupantId = null,
-                occupantName = null,
-                avatarColorHex = "#6E2CF2",
-                isMuted = false,
-                giftCoins = 0L,
-                updatedAt = now
+            val defaultSong = if (roomType == RoomType.MUSIC) "Mehfil Royal Lo-Fi • $cleanHostName" else ""
+            val roomPayload = mapOf(
+                "name" to cleanName,
+                "roomType" to roomType.name,
+                "hostId" to uid,
+                "hostName" to cleanHostName,
+                "topic" to cleanTopic,
+                "publicRoom" to true,
+                "activeMemberUids" to listOf(uid),
+                "viewerCount" to 1L,
+                "currentSongTitle" to defaultSong,
+                "musicPlaying" to (roomType == RoomType.MUSIC),
+                "hostMicOn" to true,
+                "totalGiftCoins" to 0L,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
             )
-        }
-        dao.upsertRoomSeats(seats)
+            roomRef.set(roomPayload).await()
 
-        dao.insertRoomMessage(
-            RoomMessage(
-                id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                roomId = roomId,
-                senderId = hostId,
-                senderName = hostName,
-                kind = RoomMessageKind.SYSTEM.name,
-                text = "$hostName started a ${roomType.displayTitle}! Tap any seat to take the mic.",
-                createdAt = now
-            )
-        )
-
-        if (roomType == RoomType.MUSIC) {
-            dao.upsertRoomSong(
-                RoomSongRequest(
-                    id = "song_init_$roomId",
-                    roomId = roomId,
-                    title = "Mehfil DJ Opening Mix",
-                    artist = hostName,
-                    requestedBy = hostName,
-                    isPlaying = true,
-                    createdAt = now
+            val batch = db.batch()
+            for (idx in 0 until 8) {
+                val seatRef = roomRef.collection("seats").document("seat_$idx")
+                batch.set(
+                    seatRef,
+                    mapOf(
+                        "roomId" to roomId,
+                        "seatIndex" to idx,
+                        "publicRoom" to true,
+                        "avatarColorHex" to "#6E2CF2",
+                        "muted" to false,
+                        "giftCoins" to 0L,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            val msgRef = roomRef.collection("messages").document("rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}")
+            batch.set(
+                msgRef,
+                mapOf(
+                    "roomId" to roomId,
+                    "senderId" to uid,
+                    "senderName" to cleanHostName,
+                    "kind" to RoomMessageKind.SYSTEM.name,
+                    "text" to "$cleanHostName started ${roomType.displayTitle}! Tap any seat to join live.",
+                    "publicRoom" to true,
+                    "createdAt" to FieldValue.serverTimestamp()
                 )
             )
+            if (roomType == RoomType.MUSIC) {
+                val songRef = roomRef.collection("songs").document("song_init_${sanitizeId(roomId)}")
+                batch.set(
+                    songRef,
+                    mapOf(
+                        "roomId" to roomId,
+                        "title" to "Mehfil Royal Lo-Fi",
+                        "artist" to cleanHostName,
+                        "requestedBy" to cleanHostName,
+                        "requestedByUid" to uid,
+                        "playing" to true,
+                        "publicRoom" to true,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.commit().await()
+            Result.success(roomId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docPath)
+            Result.failure(e)
         }
-        Result.success(roomId)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    }
+
+    suspend fun joinRoomPresence(roomId: String, userId: String): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            db.runTransaction { tx ->
+                val snap = tx.get(roomRef)
+                if (!snap.exists()) return@runTransaction
+                @Suppress("UNCHECKED_CAST")
+                val members = (snap.get("activeMemberUids") as? List<String>).orEmpty()
+                if (!members.contains(uid)) {
+                    val updatedMembers = (members + uid).take(50)
+                    tx.update(
+                        roomRef,
+                        mapOf(
+                            "activeMemberUids" to updatedMembers,
+                            "viewerCount" to updatedMembers.size.toLong().coerceAtLeast(1L),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun leaveRoomPresence(roomId: String, userId: String): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            // Vacate any occupied seat cleanly
+            val seats = roomRef.collection("seats")
+                .whereEqualTo("publicRoom", true)
+                .get()
+                .await()
+                .toObjects(RoomSeat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            seats.filter { it.occupantId == uid }.forEach { seat ->
+                roomRef.collection("seats").document(seat.id).update(
+                    mapOf(
+                        "occupantId" to FieldValue.delete(),
+                        "occupantName" to FieldValue.delete(),
+                        "lastReaction" to FieldValue.delete(),
+                        "muted" to false,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            db.runTransaction { tx ->
+                val snap = tx.get(roomRef)
+                if (!snap.exists()) return@runTransaction
+                @Suppress("UNCHECKED_CAST")
+                val members = (snap.get("activeMemberUids") as? List<String>).orEmpty()
+                if (members.contains(uid)) {
+                    val updatedMembers = members.filterNot { it == uid }
+                    tx.update(
+                        roomRef,
+                        mapOf(
+                            "activeMemberUids" to updatedMembers,
+                            "viewerCount" to updatedMembers.size.toLong().coerceAtLeast(1L),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun joinOrTapSeat(
@@ -412,118 +614,158 @@ class MehfilRepository(private val dao: MehfilDao) {
         seatIndex: Int,
         userId: String,
         userName: String
-    ): Result<String> = try {
-        val now = System.currentTimeMillis()
-        val seats = dao.getRoomSeats(roomId)
-        val target = seats.firstOrNull { it.seatIndex == seatIndex }
-            ?: error("Seat not found")
+    ): Result<String> {
+        val roomRef = db.collection("rooms").document(roomId)
+        val seatDocId = "seat_$seatIndex"
+        val seatRef = roomRef.collection("seats").document(seatDocId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            val cleanName = userName.trim().ifBlank { "Mehfil Guest" }.take(60)
+            val seatsSnap = roomRef.collection("seats")
+                .whereEqualTo("publicRoom", true)
+                .get()
+                .await()
+            val allSeats = seatsSnap.toObjects(RoomSeat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            val target = allSeats.firstOrNull { it.seatIndex == seatIndex }
+                ?: error("Seat not found")
 
-        return when {
-            target.occupantId == userId -> {
-                dao.upsertRoomSeat(
-                    target.copy(
-                        occupantId = null,
-                        occupantName = null,
-                        isMuted = false,
-                        lastReaction = null,
-                        updatedAt = now
-                    )
-                )
-                Result.success("Stepped down from Mic ${seatIndex + 1}")
+            return when {
+                target.occupantId == uid -> {
+                    roomRef.collection("seats").document(target.id).update(
+                        mapOf(
+                            "occupantId" to FieldValue.delete(),
+                            "occupantName" to FieldValue.delete(),
+                            "lastReaction" to FieldValue.delete(),
+                            "muted" to false,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                    Result.success("Stepped down from Mic #${seatIndex + 1}")
+                }
+                target.occupantId == null -> {
+                    // Vacate any other seat held by this user first
+                    allSeats.filter { it.occupantId == uid }.forEach { prev ->
+                        roomRef.collection("seats").document(prev.id).update(
+                            mapOf(
+                                "occupantId" to FieldValue.delete(),
+                                "occupantName" to FieldValue.delete(),
+                                "lastReaction" to FieldValue.delete(),
+                                "muted" to false,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        ).await()
+                    }
+                    roomRef.collection("seats").document(target.id).update(
+                        mapOf(
+                            "occupantId" to uid,
+                            "occupantName" to cleanName,
+                            "avatarColorHex" to "#6E2CF2",
+                            "muted" to false,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                    sendRoomSystemMessage(roomId, uid, cleanName, "$cleanName took Mic Seat #${seatIndex + 1}!")
+                    Result.success("On Mic Seat #${seatIndex + 1}")
+                }
+                else -> Result.success("Seat #${seatIndex + 1} is occupied by ${target.occupantName}")
             }
-            target.occupantId == null -> {
-                dao.vacateUserSeats(roomId, userId, now)
-                dao.upsertRoomSeat(
-                    target.copy(
-                        occupantId = userId,
-                        occupantName = userName.ifBlank { "Mehfil Guest" },
-                        avatarColorHex = "#6E2CF2",
-                        isMuted = false,
-                        updatedAt = now
-                    )
-                )
-                dao.insertRoomMessage(
-                    RoomMessage(
-                        id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                        roomId = roomId,
-                        senderId = userId,
-                        senderName = userName,
-                        kind = RoomMessageKind.SYSTEM.name,
-                        text = "$userName took Mic Seat #${seatIndex + 1}!",
-                        createdAt = now
-                    )
-                )
-                Result.success("On Mic Seat #${seatIndex + 1}")
-            }
-            else -> Result.success("Seat #${seatIndex + 1} is occupied by ${target.occupantName}")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, seatRef.path)
+            Result.failure(e)
         }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
     suspend fun toggleUserMicInRoom(
         roomId: String,
         userId: String,
         userName: String
-    ): Result<Boolean> = try {
-        val now = System.currentTimeMillis()
-        val room = dao.getPartyRoom(roomId) ?: error("Room not found")
-        if (room.hostId == userId) {
-            val next = !room.hostMicOn
-            dao.updateRoomHostMic(roomId, next, now)
-            return Result.success(next)
-        }
-        val seats = dao.getRoomSeats(roomId)
-        val mySeat = seats.firstOrNull { it.occupantId == userId }
-        if (mySeat != null) {
-            val nextMicOn = mySeat.isMuted
-            dao.upsertRoomSeat(mySeat.copy(isMuted = !nextMicOn, updatedAt = now))
-            Result.success(nextMicOn)
-        } else {
-            val freeSeat = seats.firstOrNull { it.occupantId == null }
-            if (freeSeat != null) {
-                dao.upsertRoomSeat(
-                    freeSeat.copy(
-                        occupantId = userId,
-                        occupantName = userName,
-                        isMuted = false,
-                        updatedAt = now
+    ): Result<Boolean> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            val cleanName = userName.trim().ifBlank { "Mehfil User" }.take(60)
+            val room = roomRef.get().await()
+                .toObject(PartyRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?: error("Room not found")
+
+            if (room.hostId == uid) {
+                val next = !room.hostMicOn
+                roomRef.update(
+                    mapOf(
+                        "hostMicOn" to next,
+                        "updatedAt" to FieldValue.serverTimestamp()
                     )
-                )
-                dao.insertRoomMessage(
-                    RoomMessage(
-                        id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                        roomId = roomId,
-                        senderId = userId,
-                        senderName = userName,
-                        kind = RoomMessageKind.SYSTEM.name,
-                        text = "$userName hopped onto Mic #${freeSeat.seatIndex + 1}!",
-                        createdAt = now
-                    )
-                )
-                Result.success(true)
-            } else {
-                error("All 8 mic seats are currently full")
+                ).await()
+                return Result.success(next)
             }
+
+            val allSeats = roomRef.collection("seats")
+                .whereEqualTo("publicRoom", true)
+                .get()
+                .await()
+                .toObjects(RoomSeat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                .sortedBy { it.seatIndex }
+
+            val mySeat = allSeats.firstOrNull { it.occupantId == uid }
+            if (mySeat != null) {
+                val nextMicOn = mySeat.muted
+                roomRef.collection("seats").document(mySeat.id).update(
+                    mapOf(
+                        "muted" to !nextMicOn,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                Result.success(nextMicOn)
+            } else {
+                val freeSeat = allSeats.firstOrNull { it.occupantId == null }
+                    ?: error("All 8 mic seats are currently full")
+                roomRef.collection("seats").document(freeSeat.id).update(
+                    mapOf(
+                        "occupantId" to uid,
+                        "occupantName" to cleanName,
+                        "avatarColorHex" to "#6E2CF2",
+                        "muted" to false,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                sendRoomSystemMessage(roomId, uid, cleanName, "$cleanName hopped onto Mic #${freeSeat.seatIndex + 1}!")
+                Result.success(true)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+            Result.failure(e)
         }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
-    suspend fun toggleRoomMusic(roomId: String): Result<Boolean> = try {
-        val room = dao.getPartyRoom(roomId) ?: error("Room not found")
-        val nextPlaying = !room.isMusicPlaying
-        val song = room.currentSongTitle.ifBlank { "Mehfil DJ Lounge Beat" }
-        dao.updateRoomMusic(roomId, nextPlaying, song, System.currentTimeMillis())
-        Result.success(nextPlaying)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun toggleRoomMusic(roomId: String): Result<Boolean> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            requireUserId()
+            val room = roomRef.get().await()
+                .toObject(PartyRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?: error("Room not found")
+            val nextPlaying = !room.musicPlaying
+            val song = room.currentSongTitle.ifBlank { "Mehfil Royal Lo-Fi" }
+            roomRef.update(
+                mapOf(
+                    "musicPlaying" to nextPlaying,
+                    "currentSongTitle" to song,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(nextPlaying)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun requestSongInRoom(
@@ -533,54 +775,115 @@ class MehfilRepository(private val dao: MehfilDao) {
         requesterName: String,
         requesterId: String,
         playImmediately: Boolean = false
-    ): Result<Unit> = try {
-        val cleanTitle = title.trim().take(80)
-        require(cleanTitle.isNotEmpty()) { "Song title cannot be empty." }
-        val cleanArtist = artist.trim().ifBlank { "Mehfil Request" }.take(60)
-        val now = System.currentTimeMillis()
-        val songId = "song_${UUID.randomUUID().toString().replace("-", "").take(12)}"
-        dao.upsertRoomSong(
-            RoomSongRequest(
-                id = songId,
-                roomId = roomId,
-                title = cleanTitle,
-                artist = cleanArtist,
-                requestedBy = requesterName,
-                isPlaying = playImmediately,
-                createdAt = now
-            )
-        )
-        if (playImmediately) {
-            dao.setRoomPlayingSong(roomId, songId)
-            dao.updateRoomMusic(roomId, true, "$cleanTitle • $cleanArtist", now)
+    ): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        var docPath = "${roomRef.path}/songs"
+        return try {
+            val uid = requireUserId()
+            check(uid == requesterId)
+            val cleanTitle = title.trim().take(80)
+            require(cleanTitle.isNotEmpty()) { "Song title cannot be empty." }
+            val cleanArtist = artist.trim().ifBlank { "Mehfil DJ" }.take(60)
+            val cleanRequester = requesterName.trim().ifBlank { "Mehfil Guest" }.take(60)
+            val songId = "song_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+            val songRef = roomRef.collection("songs").document(songId)
+            docPath = songRef.path
+
+            if (playImmediately) {
+                val existingSongs = roomRef.collection("songs")
+                    .whereEqualTo("publicRoom", true)
+                    .get()
+                    .await()
+                    .toObjects(RoomSongRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                existingSongs.filter { it.playing }.forEach { oldSong ->
+                    roomRef.collection("songs").document(oldSong.id).update(
+                        mapOf("playing" to false, "updatedAt" to FieldValue.serverTimestamp())
+                    ).await()
+                }
+            }
+
+            songRef.set(
+                mapOf(
+                    "roomId" to roomId,
+                    "title" to cleanTitle,
+                    "artist" to cleanArtist,
+                    "requestedBy" to cleanRequester,
+                    "requestedByUid" to uid,
+                    "playing" to playImmediately,
+                    "publicRoom" to true,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+
+            if (playImmediately) {
+                roomRef.update(
+                    mapOf(
+                        "musicPlaying" to true,
+                        "currentSongTitle" to "$cleanTitle • $cleanArtist".take(120),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+
+            roomRef.collection("messages").document("rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}")
+                .set(
+                    mapOf(
+                        "roomId" to roomId,
+                        "senderId" to uid,
+                        "senderName" to cleanRequester,
+                        "kind" to RoomMessageKind.SONG_REQUEST.name,
+                        "text" to "🎵 Requested \"$cleanTitle\" by $cleanArtist",
+                        "publicRoom" to true,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docPath)
+            Result.failure(e)
         }
-        dao.insertRoomMessage(
-            RoomMessage(
-                id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                roomId = roomId,
-                senderId = requesterId,
-                senderName = requesterName,
-                kind = RoomMessageKind.SONG_REQUEST.name,
-                text = "🎵 Requested \"$cleanTitle\" by $cleanArtist",
-                createdAt = now
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
-    suspend fun playQueuedSong(roomId: String, song: RoomSongRequest): Result<Unit> = try {
-        val now = System.currentTimeMillis()
-        dao.setRoomPlayingSong(roomId, song.id)
-        dao.updateRoomMusic(roomId, true, "${song.title} • ${song.artist}", now)
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun playQueuedSong(roomId: String, song: RoomSongRequest): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            requireUserId()
+            val allSongs = roomRef.collection("songs")
+                .whereEqualTo("publicRoom", true)
+                .get()
+                .await()
+                .toObjects(RoomSongRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+
+            val batch = db.batch()
+            allSongs.forEach { item ->
+                val ref = roomRef.collection("songs").document(item.id)
+                batch.update(
+                    ref,
+                    mapOf(
+                        "playing" to (item.id == song.id),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.update(
+                roomRef,
+                mapOf(
+                    "musicPlaying" to true,
+                    "currentSongTitle" to "${song.title} • ${song.artist}".take(120),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun sendRoomGift(
@@ -592,28 +895,54 @@ class MehfilRepository(private val dao: MehfilDao) {
         coins: Long,
         recipientLabel: String,
         recipientSeatId: String? = null
-    ): Result<Unit> = try {
-        val now = System.currentTimeMillis()
-        dao.addRoomGiftCoins(roomId, coins, now)
-        if (recipientSeatId != null) {
-            dao.addSeatGiftCoins(recipientSeatId, coins, now)
+    ): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            val uid = requireUserId()
+            check(uid == senderId)
+            val cleanSender = senderName.trim().ifBlank { "Mehfil Guest" }.take(60)
+            val safeCoins = coins.coerceAtLeast(1L)
+
+            roomRef.update(
+                mapOf(
+                    "totalGiftCoins" to FieldValue.increment(safeCoins),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+
+            if (!recipientSeatId.isNullOrBlank()) {
+                val seatRef = roomRef.collection("seats").document(recipientSeatId)
+                val seat = seatRef.get().await()
+                    .toObject(RoomSeat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                if (seat != null && !seat.occupantId.isNullOrBlank()) {
+                    seatRef.update(
+                        mapOf(
+                            "giftCoins" to FieldValue.increment(safeCoins),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            }
+
+            roomRef.collection("messages").document("rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}")
+                .set(
+                    mapOf(
+                        "roomId" to roomId,
+                        "senderId" to uid,
+                        "senderName" to cleanSender,
+                        "kind" to RoomMessageKind.GIFT.name,
+                        "text" to "$giftEmoji Sent $giftName ($safeCoins 💎) to $recipientLabel!",
+                        "publicRoom" to true,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+            Result.failure(e)
         }
-        dao.insertRoomMessage(
-            RoomMessage(
-                id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                roomId = roomId,
-                senderId = senderId,
-                senderName = senderName,
-                kind = RoomMessageKind.GIFT.name,
-                text = "$giftEmoji Sent $giftName ($coins 💎) to $recipientLabel!",
-                createdAt = now
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
     suspend fun sendRoomReaction(
@@ -621,25 +950,49 @@ class MehfilRepository(private val dao: MehfilDao) {
         senderId: String,
         senderName: String,
         emoji: String
-    ): Result<Unit> = try {
-        val now = System.currentTimeMillis()
-        dao.updateUserSeatReaction(roomId, senderId, emoji, now)
-        dao.insertRoomMessage(
-            RoomMessage(
-                id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                roomId = roomId,
-                senderId = senderId,
-                senderName = senderName,
-                kind = RoomMessageKind.REACTION.name,
-                text = "$emoji reacted",
-                createdAt = now
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    ): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        return try {
+            val uid = requireUserId()
+            check(uid == senderId)
+            val cleanSender = senderName.trim().ifBlank { "Mehfil Guest" }.take(60)
+            val cleanEmoji = emoji.trim().take(16).ifBlank { "🔥" }
+
+            val mySeat = roomRef.collection("seats")
+                .whereEqualTo("publicRoom", true)
+                .get()
+                .await()
+                .toObjects(RoomSeat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                .firstOrNull { it.occupantId == uid }
+
+            if (mySeat != null) {
+                roomRef.collection("seats").document(mySeat.id).update(
+                    mapOf(
+                        "lastReaction" to cleanEmoji,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+
+            roomRef.collection("messages").document("rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}")
+                .set(
+                    mapOf(
+                        "roomId" to roomId,
+                        "senderId" to uid,
+                        "senderName" to cleanSender,
+                        "kind" to RoomMessageKind.REACTION.name,
+                        "text" to "$cleanEmoji reacted",
+                        "publicRoom" to true,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "${roomRef.path}/messages")
+            Result.failure(e)
+        }
     }
 
     suspend fun sendRoomChatMessage(
@@ -647,25 +1000,92 @@ class MehfilRepository(private val dao: MehfilDao) {
         senderId: String,
         senderName: String,
         text: String
-    ): Result<Unit> = try {
-        val clean = text.trim().take(300)
-        require(clean.isNotEmpty()) { "Message cannot be empty." }
-        dao.insertRoomMessage(
-            RoomMessage(
-                id = "rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}",
-                roomId = roomId,
-                senderId = senderId,
-                senderName = senderName,
-                kind = RoomMessageKind.TEXT.name,
-                text = clean,
-                createdAt = System.currentTimeMillis()
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    ): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        var docPath = "${roomRef.path}/messages"
+        return try {
+            val uid = requireUserId()
+            check(uid == senderId)
+            val clean = text.trim().take(400)
+            require(clean.isNotEmpty()) { "Message cannot be empty." }
+            val cleanSender = senderName.trim().ifBlank { "Mehfil Guest" }.take(60)
+            val msgRef = roomRef.collection("messages")
+                .document("rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}")
+            docPath = msgRef.path
+            msgRef.set(
+                mapOf(
+                    "roomId" to roomId,
+                    "senderId" to uid,
+                    "senderName" to cleanSender,
+                    "kind" to RoomMessageKind.TEXT.name,
+                    "text" to clean,
+                    "publicRoom" to true,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun sendRoomSystemMessage(
+        roomId: String,
+        senderId: String,
+        senderName: String,
+        text: String
+    ) {
+        db.collection("rooms").document(roomId).collection("messages")
+            .document("rmsg_${UUID.randomUUID().toString().replace("-", "").take(12)}")
+            .set(
+                mapOf(
+                    "roomId" to roomId,
+                    "senderId" to senderId,
+                    "senderName" to senderName,
+                    "kind" to RoomMessageKind.SYSTEM.name,
+                    "text" to text.take(400),
+                    "publicRoom" to true,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+    }
+
+    suspend fun sendRoomSignal(
+        roomId: String,
+        fromUid: String,
+        toUid: String,
+        signalType: String,
+        payload: String
+    ): Result<Unit> {
+        val roomRef = db.collection("rooms").document(roomId)
+        var docPath = "${roomRef.path}/signals"
+        return try {
+            val uid = requireUserId()
+            check(uid == fromUid)
+            val sigRef = roomRef.collection("signals")
+                .document("sig_${UUID.randomUUID().toString().replace("-", "").take(14)}")
+            docPath = sigRef.path
+            sigRef.set(
+                mapOf(
+                    "roomId" to roomId,
+                    "fromUid" to uid,
+                    "toUid" to toUid,
+                    "participantUids" to listOf(uid, toUid).distinct(),
+                    "signalType" to signalType,
+                    "payload" to payload.take(30000),
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docPath)
+            Result.failure(e)
+        }
     }
 
     suspend fun updateUserSettings(
@@ -674,24 +1094,39 @@ class MehfilRepository(private val dao: MehfilDao) {
         bio: String,
         online: Boolean,
         lowDataMode: Boolean
-    ): Result<Unit> = try {
-        val current = dao.getUserById(userId) ?: error("User session not found")
-        val cleanName = displayName.trim().take(60)
-        require(cleanName.isNotEmpty()) { "Display name cannot be empty." }
-        dao.upsertUser(
-            current.copy(
-                displayName = cleanName,
-                bio = bio.trim().take(160),
-                online = online,
-                lowDataMode = lowDataMode,
-                updatedAt = System.currentTimeMillis()
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    ): Result<Unit> {
+        val userRef = db.collection("users").document(userId)
+        val profileRef = db.collection("profiles").document(userId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            val cleanName = displayName.trim().take(60)
+            require(cleanName.isNotEmpty()) { "Display name cannot be empty." }
+            val cleanBio = bio.trim().take(160)
+            userRef.update(
+                mapOf(
+                    "displayName" to cleanName,
+                    "bio" to cleanBio,
+                    "online" to online,
+                    "lowDataMode" to lowDataMode,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            profileRef.update(
+                mapOf(
+                    "displayName" to cleanName,
+                    "statusText" to cleanBio.take(120).ifBlank { "On Mehfil" },
+                    "online" to online,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun addContact(
@@ -701,81 +1136,117 @@ class MehfilRepository(private val dao: MehfilDao) {
         mehfilId: String,
         statusText: String,
         avatarColorHex: String = "#6E2CF2"
-    ): Result<Unit> = try {
-        val cleanName = displayName.trim().take(60)
-        require(cleanName.isNotEmpty()) { "Contact name cannot be empty." }
-        val now = System.currentTimeMillis()
-        dao.upsertContact(
-            Contact(
-                id = "${userId}_$peerId",
-                userId = userId,
-                peerId = peerId,
-                displayName = cleanName,
-                mehfilId = mehfilId.trim().ifBlank { "mehfil_friend" }.take(40),
-                statusText = statusText.trim().ifBlank { "On Mehfil" }.take(120),
-                avatarColorHex = avatarColorHex,
-                online = true,
-                favorite = false,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    ): Result<Unit> {
+        val cleanPeerId = sanitizeId(peerId).take(128)
+        val contactRef = db.collection("users").document(userId).collection("contacts").document(cleanPeerId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            val cleanName = displayName.trim().take(60)
+            require(cleanName.isNotEmpty()) { "Contact name cannot be empty." }
+            contactRef.set(
+                mapOf(
+                    "userId" to uid,
+                    "peerId" to peerId.trim().take(128),
+                    "displayName" to cleanName,
+                    "mehfilId" to mehfilId.trim().ifBlank { "mehfil_friend" }.take(40),
+                    "statusText" to statusText.trim().ifBlank { "On Mehfil" }.take(120),
+                    "avatarColorHex" to avatarColorHex,
+                    "online" to true,
+                    "favorite" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, contactRef.path)
+            Result.failure(e)
+        }
     }
 
-    suspend fun toggleContactFavorite(contactId: String, favorite: Boolean): Result<Unit> = try {
-        dao.updateContactFavorite(contactId, favorite, System.currentTimeMillis())
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun toggleContactFavorite(userId: String, contactId: String, favorite: Boolean): Result<Unit> {
+        val contactRef = db.collection("users").document(userId).collection("contacts").document(contactId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            contactRef.update(
+                mapOf(
+                    "favorite" to favorite,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, contactRef.path)
+            Result.failure(e)
+        }
     }
 
-    suspend fun deleteContact(contactId: String): Result<Unit> = try {
-        dao.deleteContact(contactId)
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun deleteContact(userId: String, contactId: String): Result<Unit> {
+        val contactRef = db.collection("users").document(userId).collection("contacts").document(contactId)
+        return try {
+            val uid = requireUserId()
+            check(uid == userId)
+            contactRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, contactRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun getOrCreateDirectChat(
         currentUserId: String,
+        currentUserName: String,
         peerId: String,
         peerName: String
-    ): Result<String> = try {
-        val chatId = "chat_${currentUserId}_$peerId"
-        if (dao.getChatById(chatId) == null) {
-            val now = System.currentTimeMillis()
-            dao.upsertChat(
-                Chat(
-                    id = chatId,
-                    ownerUserId = currentUserId,
-                    peerId = peerId,
-                    peerName = peerName.take(60),
-                    chatKind = ChatKind.DIRECT.name,
-                    lastMessageText = "Say salam on Mehfil!",
-                    lastMessageType = MessageType.TEXT.name,
-                    lastMessageSenderId = currentUserId,
-                    unreadCount = 0L,
-                    pinned = false,
-                    muted = false,
-                    createdAt = now,
-                    updatedAt = now
-                )
-            )
+    ): Result<String> {
+        val chatId = directChatId(currentUserId, peerId)
+        val chatRef = db.collection("chats").document(chatId)
+        return try {
+            val uid = requireUserId()
+            check(uid == currentUserId)
+            val snap = chatRef.get().await()
+            if (!snap.exists()) {
+                val cleanMyName = currentUserName.trim().ifBlank { "Mehfil User" }.take(60)
+                val cleanPeerName = peerName.trim().ifBlank { "Mehfil Friend" }.take(60)
+                val participants = listOf(uid, peerId).distinct()
+                val namesMap = if (peerId == uid) {
+                    mapOf(uid to cleanMyName)
+                } else {
+                    mapOf(uid to cleanMyName, peerId to cleanPeerName)
+                }
+                chatRef.set(
+                    mapOf(
+                        "participantUids" to participants,
+                        "participantNames" to namesMap,
+                        "chatKind" to ChatKind.DIRECT.name,
+                        "title" to cleanPeerName.take(80),
+                        "lastMessageText" to "Say salam on Mehfil!",
+                        "lastMessageType" to MessageType.TEXT.name,
+                        "lastMessageSenderId" to uid,
+                        "unreadCount" to 0L,
+                        "pinned" to false,
+                        "muted" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(chatId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, chatRef.path)
+            Result.failure(e)
         }
-        Result.success(chatId)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
     suspend fun sendMessage(
@@ -785,46 +1256,83 @@ class MehfilRepository(private val dao: MehfilDao) {
         messageType: MessageType,
         text: String,
         mediaDurationSec: Long = 0L,
-        imageDataBase64: String? = null
-    ): Result<Unit> = try {
-        val now = System.currentTimeMillis()
-        val cleanText = text.trim().take(1000)
-        val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-        dao.insertMessage(
-            ChatMessage(
-                id = msgId,
-                chatId = chatId,
-                senderId = senderId,
-                senderName = senderName.ifBlank { "Mehfil User" }.take(60),
-                messageType = messageType.name,
-                text = cleanText,
-                mediaDurationSec = mediaDurationSec.coerceIn(0L, 600L),
-                imageDataBase64 = imageDataBase64,
-                createdAt = now,
-                updatedAt = now
+        imageDataBase64: String? = null,
+        audioDataBase64: String? = null
+    ): Result<Unit> {
+        val chatRef = db.collection("chats").document(chatId)
+        var msgPath = "${chatRef.path}/messages"
+        return try {
+            val uid = requireUserId()
+            check(uid == senderId)
+            val chat = chatRef.get().await()
+                .toObject(Chat::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?: error("Chat does not exist")
+            val participants = chat.participantUids.ifEmpty { listOf(uid) }
+            val cleanText = text.trim().take(1000)
+            val cleanSender = senderName.trim().ifBlank { "Mehfil User" }.take(60)
+            val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+            val msgRef = chatRef.collection("messages").document(msgId)
+            msgPath = msgRef.path
+
+            val msgPayload = mapOf<String, Any?>(
+                "chatId" to chatId,
+                "senderId" to uid,
+                "senderName" to cleanSender,
+                "participantUids" to participants,
+                "messageType" to messageType.name,
+                "text" to cleanText,
+                "mediaDurationSec" to mediaDurationSec.coerceIn(0L, 600L),
+                "imageDataBase64" to imageDataBase64?.take(150000),
+                "audioDataBase64" to audioDataBase64?.take(250000),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            ).filterValues { it != null }
+
+            val preview = when (messageType) {
+                MessageType.VOICE -> "🎤 Voice note (${mediaDurationSec}s)"
+                MessageType.IMAGE -> "📷 Photo${if (cleanText.isNotBlank()) ": $cleanText" else ""}"
+                MessageType.CALL -> cleanText
+                MessageType.TEXT -> cleanText
+            }.take(500)
+
+            val batch = db.batch()
+            batch.set(msgRef, msgPayload)
+            batch.update(
+                chatRef,
+                mapOf(
+                    "lastMessageText" to preview,
+                    "lastMessageType" to messageType.name,
+                    "lastMessageSenderId" to uid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
             )
-        )
-        val preview = when (messageType) {
-            MessageType.VOICE -> "🎤 Voice note (${mediaDurationSec}s)"
-            MessageType.IMAGE -> "📷 Photo${if (cleanText.isNotBlank()) ": $cleanText" else ""}"
-            MessageType.CALL -> cleanText
-            MessageType.TEXT -> cleanText
-        }.take(500)
-        dao.updateChatPreview(chatId, preview, messageType.name, senderId, now)
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, msgPath)
+            Result.failure(e)
+        }
     }
 
-    suspend fun reactToMessage(messageId: String, reaction: String): Result<Unit> = try {
-        dao.updateMessageReaction(messageId, reaction, System.currentTimeMillis())
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun reactToMessage(chatId: String, messageId: String, reaction: String): Result<Unit> {
+        val msgRef = db.collection("chats").document(chatId).collection("messages").document(messageId)
+        return try {
+            requireUserId()
+            msgRef.update(
+                mapOf(
+                    "reaction" to reaction.trim().take(16),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, msgRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun startCall(
@@ -834,30 +1342,132 @@ class MehfilRepository(private val dao: MehfilDao) {
         calleeName: String,
         callType: CallType,
         qualityMode: CallQualityMode
-    ): Result<String> = try {
-        val now = System.currentTimeMillis()
+    ): Result<String> {
         val callId = "call_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-        dao.upsertCall(
-            CallRecord(
-                id = callId,
-                ownerUserId = callerId,
-                callerId = callerId,
-                callerName = callerName.ifBlank { "Mehfil User" },
-                calleeId = calleeId,
-                calleeName = calleeName.ifBlank { "Mehfil Contact" },
-                callType = callType.name,
-                status = CallStatus.ACTIVE.name,
-                qualityMode = qualityMode.name,
-                durationSeconds = 0L,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
-        Result.success(callId)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            val uid = requireUserId()
+            check(uid == callerId)
+            val isStudioSelfCheck = calleeId == "mehfil_studio" || calleeId == uid
+            val participants = if (calleeId == uid) listOf(uid) else listOf(uid, calleeId)
+            callRef.set(
+                mapOf(
+                    "callerId" to uid,
+                    "callerName" to callerName.trim().ifBlank { "Mehfil User" }.take(60),
+                    "calleeId" to calleeId.trim().take(128),
+                    "calleeName" to calleeName.trim().ifBlank { "Mehfil Contact" }.take(60),
+                    "participantUids" to participants,
+                    "callType" to callType.name,
+                    "status" to if (isStudioSelfCheck) CallStatus.ACTIVE.name else CallStatus.RINGING.name,
+                    "qualityMode" to qualityMode.name,
+                    "durationSeconds" to 0L,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(callId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, callRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun publishCallOffer(callId: String, offerSdp: String): Result<Unit> {
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            requireUserId()
+            val current = callRef.get().await().getString("status") ?: return Result.success(Unit)
+            if (current != CallStatus.RINGING.name && current != CallStatus.ACTIVE.name) return Result.success(Unit)
+            callRef.update(
+                mapOf(
+                    "offerSdp" to offerSdp.take(30000),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun publishCallAnswer(callId: String, answerSdp: String): Result<Unit> {
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            requireUserId()
+            val current = callRef.get().await().getString("status") ?: return Result.success(Unit)
+            if (current != CallStatus.RINGING.name && current != CallStatus.ACTIVE.name) return Result.success(Unit)
+            callRef.update(
+                mapOf(
+                    "status" to CallStatus.ACTIVE.name,
+                    "answerSdp" to answerSdp.take(30000),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addCallIceCandidate(
+        callId: String,
+        participantUids: List<String>,
+        sdpMid: String,
+        sdpMLineIndex: Int,
+        sdpCandidate: String
+    ): Result<Unit> {
+        val callRef = db.collection("calls").document(callId)
+        val candRef = callRef.collection("candidates")
+            .document("cand_${UUID.randomUUID().toString().replace("-", "").take(14)}")
+        return try {
+            val uid = requireUserId()
+            candRef.set(
+                mapOf(
+                    "callId" to callId,
+                    "senderId" to uid,
+                    "participantUids" to participantUids,
+                    "sdpMid" to sdpMid.take(64),
+                    "sdpMLineIndex" to sdpMLineIndex.coerceIn(0, 32),
+                    "sdpCandidate" to sdpCandidate.take(4096),
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, candRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateCallQuality(callId: String, qualityMode: CallQualityMode): Result<Unit> {
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            requireUserId()
+            val current = callRef.get().await().getString("status") ?: return Result.success(Unit)
+            if (current != CallStatus.RINGING.name && current != CallStatus.ACTIVE.name) return Result.success(Unit)
+            callRef.update(
+                mapOf(
+                    "qualityMode" to qualityMode.name,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun updateCall(
@@ -865,13 +1475,30 @@ class MehfilRepository(private val dao: MehfilDao) {
         status: CallStatus,
         durationSeconds: Long,
         qualityMode: CallQualityMode
-    ): Result<Unit> = try {
-        dao.updateCall(callId, status.name, durationSeconds.coerceIn(0L, 86400L), qualityMode.name, System.currentTimeMillis())
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    ): Result<Unit> {
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            requireUserId()
+            val current = callRef.get().await().getString("status") ?: return Result.success(Unit)
+            // Respect terminal state locking in firestore.rules
+            if (current != CallStatus.RINGING.name && current != CallStatus.ACTIVE.name) {
+                return Result.success(Unit)
+            }
+            callRef.update(
+                mapOf(
+                    "status" to status.name,
+                    "durationSeconds" to durationSeconds.coerceIn(0L, 86400L),
+                    "qualityMode" to qualityMode.name,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path)
+            Result.failure(e)
+        }
     }
 
     suspend fun postStory(
@@ -880,37 +1507,52 @@ class MehfilRepository(private val dao: MehfilDao) {
         caption: String,
         moodEmoji: String,
         accentHex: String
-    ): Result<Unit> = try {
-        val cleanCaption = caption.trim().take(200)
-        require(cleanCaption.isNotEmpty()) { "Story caption cannot be empty." }
-        val now = System.currentTimeMillis()
+    ): Result<Unit> {
         val storyId = "story_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-        dao.upsertStory(
-            Story(
-                id = storyId,
-                ownerId = ownerId,
-                ownerName = ownerName.ifBlank { "Mehfil User" },
-                caption = cleanCaption,
-                moodEmoji = moodEmoji.ifBlank { "✨" },
-                accentHex = accentHex,
-                viewCount = 0L,
-                createdAt = now,
-                updatedAt = now
-            )
-        )
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+        val storyRef = db.collection("stories").document(storyId)
+        return try {
+            val uid = requireUserId()
+            check(uid == ownerId)
+            val cleanCaption = caption.trim().take(200)
+            require(cleanCaption.isNotEmpty()) { "Story caption cannot be empty." }
+            storyRef.set(
+                mapOf(
+                    "ownerId" to uid,
+                    "ownerName" to ownerName.trim().ifBlank { "Mehfil User" }.take(60),
+                    "caption" to cleanCaption,
+                    "moodEmoji" to moodEmoji.trim().ifBlank { "✨" }.take(16),
+                    "accentHex" to accentHex.trim().take(10).ifBlank { "#6E2CF2" },
+                    "discoverable" to true,
+                    "viewCount" to 0L,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, storyRef.path)
+            Result.failure(e)
+        }
     }
 
-    suspend fun incrementStoryView(storyId: String): Result<Unit> = try {
-        dao.incrementStoryView(storyId, System.currentTimeMillis())
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Result.failure(e)
+    suspend fun incrementStoryView(storyId: String): Result<Unit> {
+        val storyRef = db.collection("stories").document(storyId)
+        return try {
+            requireUserId()
+            storyRef.update(
+                mapOf(
+                    "viewCount" to FieldValue.increment(1L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, storyRef.path)
+            Result.failure(e)
+        }
     }
 }

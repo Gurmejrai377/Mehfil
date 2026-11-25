@@ -9,19 +9,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-private val MehfilLuxuryDarkColorScheme = darkColorScheme(
-    primary = MehfilGold,
-    onPrimary = MehfilMidnightPlum,
+private val MehfilAuroraDarkColorScheme = darkColorScheme(
+    primary = MehfilNeonGreen,
+    onPrimary = MehfilObsidian,
     primaryContainer = MehfilLavenderContainer,
-    onPrimaryContainer = MehfilChampagne,
-    secondary = MehfilPurple,
-    onSecondary = Color.White,
+    onPrimaryContainer = MehfilIceWhite,
+    secondary = MehfilNeonCyan,
+    onSecondary = MehfilObsidian,
     secondaryContainer = MehfilGoldContainer,
     onSecondaryContainer = MehfilGoldOnContainer,
-    tertiary = MehfilPurpleLight,
-    onTertiary = MehfilMidnightPlum,
+    tertiary = MehfilNeonPink,
+    onTertiary = Color.White,
     tertiaryContainer = MehfilCoralContainer,
-    onTertiaryContainer = Color(0xFFFFD9E2),
+    onTertiaryContainer = Color(0xFFFFD6EA),
     background = DarkBackground,
     onBackground = DarkOnSurface,
     surface = DarkSurface,
@@ -34,15 +34,15 @@ private val MehfilLuxuryDarkColorScheme = darkColorScheme(
 )
 
 private val MehfilLightColorScheme = lightColorScheme(
-    primary = MehfilPurple,
+    primary = Color(0xFF00B85C),
     onPrimary = Color.White,
     primaryContainer = LightSurfaceVariant,
-    onPrimaryContainer = MehfilDeepPurple,
-    secondary = MehfilRichGold,
-    onSecondary = MehfilMidnightPlum,
-    secondaryContainer = Color(0xFFFFF0C2),
-    onSecondaryContainer = Color(0xFF3A2800),
-    tertiary = MehfilCoral,
+    onPrimaryContainer = MehfilObsidian,
+    secondary = Color(0xFF0099CC),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFD5F9E8),
+    onSecondaryContainer = Color(0xFF00331A),
+    tertiary = MehfilNeonPink,
     onTertiary = Color.White,
     background = LightBackground,
     onBackground = LightOnSurface,
@@ -67,7 +67,7 @@ fun MehfilTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) MehfilLuxuryDarkColorScheme else MehfilLightColorScheme
+    val colorScheme = if (darkTheme) MehfilAuroraDarkColorScheme else MehfilLightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

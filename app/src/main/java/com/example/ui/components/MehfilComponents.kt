@@ -72,10 +72,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.media.Ringtone
+import android.media.RingtoneManager
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.CallEnd
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
-import com.example.data.LoginMode
+import com.example.data.CallRecord
+import com.example.data.CallType
 import com.example.data.Story
 import com.example.data.UserAccount
 import com.example.ui.theme.MehfilChampagne
@@ -109,23 +117,24 @@ fun MehfilLogoBadge(
     Box(
         modifier = modifier
             .size(size)
-            .shadow(elevation = 10.dp, shape = CircleShape, ambientColor = MehfilGold, spotColor = MehfilGold)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    listOf(MehfilRoyalPurple, Color(0xFF14063B))
-                )
+            .shadow(
+                elevation = 12.dp,
+                shape = CircleShape,
+                ambientColor = MehfilPurple,
+                spotColor = MehfilGold
             )
+            .clip(CircleShape)
+            .background(MehfilMidnightPlum)
             .border(
                 width = (size.value * 0.045f).dp.coerceAtLeast(1.5.dp),
-                brush = Brush.linearGradient(listOf(MehfilChampagne, MehfilGold, MehfilRichGold)),
+                brush = Brush.linearGradient(listOf(MehfilGold, MehfilPurple, MehfilRichGold)),
                 shape = CircleShape
             ),
         contentAlignment = Alignment.Center
     ) {
         Image(
             painter = painterResource(id = R.drawable.ic_mehfil_foreground),
-            contentDescription = "Mehfil golden microphone luxury logo",
+            contentDescription = "Mehfil 3D neon logo",
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
@@ -144,9 +153,15 @@ fun MehfilGlassCard(
     content: @Composable BoxScope.() -> Unit
 ) {
     val borderBrush = if (highlightGold) {
-        Brush.linearGradient(listOf(MehfilChampagne.copy(alpha = 0.72f), MehfilRichGold.copy(alpha = 0.45f)))
+        Brush.linearGradient(
+            listOf(
+                MehfilGold.copy(alpha = 0.72f),
+                MehfilPurple.copy(alpha = 0.65f),
+                MehfilRichGold.copy(alpha = 0.6f)
+            )
+        )
     } else {
-        Brush.linearGradient(listOf(MehfilGlassStroke, MehfilPurpleLight.copy(alpha = 0.28f)))
+        Brush.linearGradient(listOf(MehfilGlassStroke, Color.White.copy(alpha = 0.14f)))
     }
 
     Surface(
@@ -162,7 +177,7 @@ fun MehfilGlassCard(
             modifier = Modifier.background(
                 Brush.verticalGradient(
                     listOf(
-                        Color.White.copy(alpha = 0.06f),
+                        Color.White.copy(alpha = 0.05f),
                         Color.Transparent
                     )
                 )
@@ -250,7 +265,7 @@ fun MehfilAvatar(
                 .fillMaxSize()
                 .border(
                     width = 2.5.dp,
-                    brush = Brush.linearGradient(listOf(MehfilChampagne, MehfilGold, MehfilPurple)),
+                    brush = Brush.linearGradient(listOf(MehfilGold, MehfilPurple, MehfilRichGold)),
                     shape = CircleShape
                 )
                 .padding(3.5.dp)
@@ -259,7 +274,7 @@ fun MehfilAvatar(
                 .fillMaxSize()
                 .border(
                     width = 1.dp,
-                    color = MehfilGold.copy(alpha = 0.35f),
+                    color = MehfilPurple.copy(alpha = 0.42f),
                     shape = CircleShape
                 )
         }
@@ -436,11 +451,12 @@ fun ProfileSettingsSheet(
     onDismiss: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    var name by remember(account) { mutableStateOf(account?.displayName ?: "Mehfil Guest") }
+    var name by remember(account) { mutableStateOf(account?.displayName ?: "Mehfil Member") }
     var bio by remember(account) { mutableStateOf(account?.bio ?: "Yahan har baat ek Mehfil hai") }
     var online by remember(account) { mutableStateOf(account?.online ?: true) }
     var lowDataMode by remember(account) { mutableStateOf(account?.lowDataMode ?: false) }
     var copied by remember { mutableStateOf(false) }
+    val mehfilId = account?.mehfilId ?: "mehfil_member"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -451,123 +467,153 @@ fun ProfileSettingsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .padding(horizontal = 22.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Mockup-style centered profile header ("Ali Khan • Online")
+            MehfilAvatar(
+                name = name,
+                accentHex = "#00D4FF",
+                size = 82.dp,
+                online = online,
+                hasStoryRing = true
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = name,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                MehfilAvatar(
-                    name = name,
-                    size = 60.dp,
-                    online = online,
-                    hasStoryRing = true
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (online) MehfilMint else MehfilCoral)
                 )
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = name,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val modeLabel = if (LoginMode.fromRaw(account?.loginMode) == LoginMode.PHONE) {
-                        "Phone: ${account?.phoneNumber ?: "Verified"}"
-                    } else {
-                        "Guest Session"
-                    }
-                    Text(
-                        text = modeLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val mehfilId = account?.mehfilId ?: "mehfil_guest"
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (online) "Online" else "Away",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (online) MehfilMint else MehfilCoral,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "• ${account?.email ?: "Mehfil Cloud"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Frosted grouped settings card
+            MehfilGlassCard(
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .padding(top = 4.dp)
+                            .fillMaxWidth()
                             .clickable {
                                 clipboard.setText(AnnotatedString(mehfilId))
                                 copied = true
                             }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (copied) "Copied $mehfilId" else "Mehfil ID: $mehfilId",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MehfilGold
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Column {
+                            Text("Account ID", style = MaterialTheme.typography.labelSmall, color = MehfilPurple)
+                            Text(
+                                text = if (copied) "Copied $mehfilId" else mehfilId,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MehfilGold
+                            )
+                        }
                         Icon(
                             imageVector = Icons.Rounded.ContentCopy,
                             contentDescription = "Copy Mehfil ID",
                             tint = MehfilGold,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(18.dp)
                         )
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { if (it.length <= 60) name = it },
+                        label = { Text("Display Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("profile_name_input")
+                    )
+
+                    OutlinedTextField(
+                        value = bio,
+                        onValueChange = { if (it.length <= 160) bio = it },
+                        label = { Text("Status Bio") },
+                        maxLines = 2,
+                        modifier = Modifier.fillMaxWidth().testTag("profile_bio_input")
+                    )
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Privacy • Online Status", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Show friends when you're online",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = online, onCheckedChange = { online = it })
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.DataSaverOn,
+                                contentDescription = null,
+                                tint = MehfilPurple,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Call Settings • Low-Data", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "Optimize audio & video on slow data",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(checked = lowDataMode, onCheckedChange = { lowDataMode = it })
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-            OutlinedTextField(
-                value = name,
-                onValueChange = { if (it.length <= 60) name = it },
-                label = { Text("Display Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("profile_name_input")
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = bio,
-                onValueChange = { if (it.length <= 160) bio = it },
-                label = { Text("Status Bio") },
-                maxLines = 2,
-                modifier = Modifier.fillMaxWidth().testTag("profile_bio_input")
-            )
             Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Show Online Status", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "Let contacts & rooms see when you're online",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = online, onCheckedChange = { online = it })
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.DataSaverOn,
-                        contentDescription = null,
-                        tint = MehfilGold,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text("Low-Data Call Mode", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            "Optimize video calls for slower networks",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Switch(checked = lowDataMode, onCheckedChange = { lowDataMode = it })
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
             Button(
                 onClick = {
                     onSave(name, bio, online, lowDataMode)
@@ -578,19 +624,19 @@ fun ProfileSettingsSheet(
                     containerColor = MehfilGold,
                     contentColor = MehfilMidnightPlum
                 ),
+                shape = RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth().height(50.dp).testTag("save_profile_button")
             ) {
                 Text("Save Changes", fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-            Spacer(modifier = Modifier.height(10.dp))
 
             OutlinedButton(
                 onClick = onSignOut,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MehfilCoral),
-                border = BorderStroke(1.dp, MehfilCoral.copy(alpha = 0.6f)),
+                border = BorderStroke(1.dp, MehfilCoral.copy(alpha = 0.55f)),
+                shape = RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth().height(48.dp).testTag("sign_out_button")
             ) {
                 Icon(
@@ -602,6 +648,159 @@ fun ProfileSettingsSheet(
                 Text("Switch Account / Sign Out")
             }
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun IncomingCallOverlay(
+    call: CallRecord,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    val context = LocalContext.current
+    val isVideo = CallType.fromRaw(call.callType) == CallType.VIDEO
+
+    DisposableEffect(call.id) {
+        val ringtone: Ringtone? = try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(context.applicationContext, uri)?.also { it.play() }
+        } catch (_: Exception) {
+            null
+        }
+        onDispose {
+            try {
+                ringtone?.stop()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(MehfilMidnightPlum, MehfilDeepPurple, MehfilRoyalPurple)
+                    )
+                )
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(28.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Surface(
+                        color = MehfilGold.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, MehfilGold.copy(alpha = 0.55f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isVideo) Icons.Rounded.Videocam else Icons.Rounded.Call,
+                                contentDescription = null,
+                                tint = MehfilGold,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isVideo) "Incoming Mehfil Video Call" else "Incoming Mehfil Voice Call",
+                                color = MehfilGold,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    MehfilAvatar(
+                        name = call.callerName,
+                        size = 120.dp,
+                        online = true,
+                        hasStoryRing = true
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = call.callerName,
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Ringing on Mehfil...",
+                        color = MehfilChampagne.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        IconButton(
+                            onClick = onDecline,
+                            modifier = Modifier
+                                .size(68.dp)
+                                .clip(CircleShape)
+                                .background(MehfilCoral)
+                                .testTag("decline_incoming_call_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CallEnd,
+                                contentDescription = "Decline call",
+                                tint = Color.White,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Decline", color = MehfilChampagne, style = MaterialTheme.typography.labelMedium)
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        IconButton(
+                            onClick = onAccept,
+                            modifier = Modifier
+                                .size(68.dp)
+                                .clip(CircleShape)
+                                .background(MehfilMint)
+                                .testTag("accept_incoming_call_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isVideo) Icons.Rounded.Videocam else Icons.Rounded.Call,
+                                contentDescription = "Accept call",
+                                tint = MehfilMidnightPlum,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Accept", color = MehfilMint, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }

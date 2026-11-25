@@ -1,5 +1,6 @@
 package com.example.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.MehfilRepository
@@ -8,6 +9,9 @@ import com.example.data.RoomMessage
 import com.example.data.RoomSeat
 import com.example.data.RoomSongRequest
 import com.example.data.UiState
+import com.example.data.unwrapFirestoreError
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +20,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class GiftBurst(
     val id: Long = System.currentTimeMillis(),
@@ -25,27 +30,50 @@ data class GiftBurst(
 )
 
 class PartyRoomViewModel(
-    private val repository: MehfilRepository,
+    val repository: MehfilRepository,
     val roomId: String,
     val currentUserId: String,
     val currentUserName: String
 ) : ViewModel() {
 
+    init {
+        viewModelScope.launch {
+            repository.joinRoomPresence(roomId, currentUserId)
+        }
+    }
+
     val roomState: StateFlow<UiState<PartyRoom?>> = repository.observePartyRoom(roomId)
         .map<PartyRoom?, UiState<PartyRoom?>> { UiState.Success(it) }
-        .catch { emit(UiState.Error(it.localizedMessage ?: "Failed to load room")) }
+        .catch { error ->
+            val unwrapped = unwrapFirestoreError(error)
+            if (unwrapped is CancellationException) throw unwrapped
+            Log.w("PartyRoomVM", "Error observing room", unwrapped)
+            emit(UiState.Error(unwrapped.message ?: "Failed to load room"))
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
     val seatsState: StateFlow<List<RoomSeat>> = repository.observeRoomSeats(roomId)
-        .catch { emit(emptyList()) }
+        .catch { error ->
+            val unwrapped = unwrapFirestoreError(error)
+            if (unwrapped is CancellationException) throw unwrapped
+            emit(emptyList())
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     val messagesState: StateFlow<List<RoomMessage>> = repository.observeRoomMessages(roomId)
-        .catch { emit(emptyList()) }
+        .catch { error ->
+            val unwrapped = unwrapFirestoreError(error)
+            if (unwrapped is CancellationException) throw unwrapped
+            emit(emptyList())
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     val songsState: StateFlow<List<RoomSongRequest>> = repository.observeRoomSongs(roomId)
-        .catch { emit(emptyList()) }
+        .catch { error ->
+            val unwrapped = unwrapFirestoreError(error)
+            if (unwrapped is CancellationException) throw unwrapped
+            emit(emptyList())
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     private val _giftBursts = MutableSharedFlow<GiftBurst>(extraBufferCapacity = 8)
@@ -53,6 +81,15 @@ class PartyRoomViewModel(
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events = _events.asSharedFlow()
+
+    fun leaveRoom(onDone: () -> Unit) {
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                repository.leaveRoomPresence(roomId, currentUserId)
+            }
+            onDone()
+        }
+    }
 
     fun tapSeat(seatIndex: Int) {
         viewModelScope.launch {

@@ -33,9 +33,9 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -76,8 +77,9 @@ import com.example.data.CallType
 import com.example.data.ChatMessage
 import com.example.data.MessageType
 import com.example.data.UiState
-import com.example.media.AudioLevelMonitor
 import com.example.media.ImageUtils
+import com.example.media.VoiceNoteManager
+import com.example.ui.components.AnimatedMusicEqualizer
 import com.example.ui.components.MehfilAvatar
 import com.example.ui.theme.MehfilCoral
 import com.example.ui.theme.MehfilDeepPurple
@@ -85,10 +87,10 @@ import com.example.ui.theme.MehfilGold
 import com.example.ui.theme.MehfilMint
 import com.example.ui.theme.MehfilPurple
 import com.example.viewmodel.ChatDetailViewModel
+import com.google.firebase.Timestamp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -108,6 +110,14 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val voiceNoteManager = remember(context) { VoiceNoteManager(context.applicationContext) }
+    val playingMessageId by voiceNoteManager.playingMessageId.collectAsStateWithLifecycle()
+    val liveMicLevel by voiceNoteManager.micAmplitude.collectAsStateWithLifecycle()
+
+    DisposableEffect(voiceNoteManager) {
+        onDispose { voiceNoteManager.release() }
+    }
+
     var draftText by remember { mutableStateOf("") }
     var isRecordingVoice by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableLongStateOf(0L) }
@@ -120,13 +130,24 @@ fun ChatDetailScreen(
         )
     }
 
+    val beginRecording = {
+        val started = voiceNoteManager.startRecording(scope)
+        if (started) {
+            isRecordingVoice = true
+            recordingSeconds = 0L
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("Microphone unavailable on this device.")
+            }
+        }
+    }
+
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasMicPermission = granted
         if (granted) {
-            isRecordingVoice = true
-            recordingSeconds = 0L
+            beginRecording()
         } else {
             scope.launch {
                 snackbarHostState.showSnackbar("Microphone permission is required for voice notes.")
@@ -148,10 +169,6 @@ fun ChatDetailScreen(
             }
         }
     }
-
-    val liveMicLevel by AudioLevelMonitor
-        .observeMicLevel(hasPermission = hasMicPermission && isRecordingVoice, isMuted = !isRecordingVoice)
-        .collectAsStateWithLifecycle(initialValue = 0f)
 
     LaunchedEffect(isRecordingVoice) {
         if (isRecordingVoice) {
@@ -286,6 +303,7 @@ fun ChatDetailScreen(
                         ) {
                             IconButton(
                                 onClick = {
+                                    voiceNoteManager.cancelRecording()
                                     isRecordingVoice = false
                                     recordingSeconds = 0L
                                 },
@@ -323,10 +341,11 @@ fun ChatDetailScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
                                 onClick = {
-                                    val duration = recordingSeconds.coerceAtLeast(1L)
                                     isRecordingVoice = false
+                                    val (audioBase64, duration) = voiceNoteManager.stopRecordingAndEncode()
+                                    val finalDuration = maxOf(duration, recordingSeconds.coerceAtLeast(1L))
                                     recordingSeconds = 0L
-                                    viewModel.sendVoiceNote(currentUserName, duration)
+                                    viewModel.sendVoiceNote(currentUserName, audioBase64, finalDuration)
                                 },
                                 modifier = Modifier
                                     .size(48.dp)
@@ -379,8 +398,7 @@ fun ChatDetailScreen(
                                 IconButton(
                                     onClick = {
                                         if (hasMicPermission) {
-                                            isRecordingVoice = true
-                                            recordingSeconds = 0L
+                                            beginRecording()
                                         } else {
                                             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                         }
@@ -453,7 +471,18 @@ fun ChatDetailScreen(
                     items(state.data, key = { it.id }) { msg ->
                         MessageBubbleItem(
                             message = msg,
-                            isMine = msg.senderId == currentUserId && msg.senderName != "Mehfil Studio",
+                            isMine = msg.senderId == currentUserId,
+                            isPlayingAudio = playingMessageId == msg.id,
+                            onPlayVoiceNote = {
+                                if (!msg.audioDataBase64.isNullOrBlank()) {
+                                    val ok = voiceNoteManager.togglePlayback(msg.id, msg.audioDataBase64)
+                                    if (!ok) {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("Unable to play voice note on this device.")
+                                        }
+                                    }
+                                }
+                            },
                             onSelectForReaction = { selectedMessageForReaction = msg }
                         )
                     }
@@ -463,15 +492,17 @@ fun ChatDetailScreen(
     }
 }
 
-private fun formatMessageTime(epochMillis: Long): String {
-    return if (epochMillis <= 0L) "Now"
-    else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(epochMillis))
+private fun formatMessageTime(ts: Timestamp?): String {
+    return if (ts == null) "Now"
+    else SimpleDateFormat("h:mm a", Locale.getDefault()).format(ts.toDate())
 }
 
 @Composable
 private fun MessageBubbleItem(
     message: ChatMessage,
     isMine: Boolean,
+    isPlayingAudio: Boolean,
+    onPlayVoiceNote: () -> Unit,
     onSelectForReaction: () -> Unit
 ) {
     val msgType = MessageType.fromRaw(message.messageType)
@@ -555,16 +586,32 @@ private fun MessageBubbleItem(
                     }
 
                     if (msgType == MessageType.VOICE) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.GraphicEq,
-                                contentDescription = "Voice note",
-                                tint = if (isMine) MehfilGold else contentColor,
-                                modifier = Modifier.size(24.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable(enabled = !message.audioDataBase64.isNullOrBlank(), onClick = onPlayVoiceNote)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isMine) MehfilGold else MehfilPurple),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlayingAudio) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                                    contentDescription = if (isPlayingAudio) "Stop voice note" else "Play voice note",
+                                    tint = if (isMine) MehfilDeepPurple else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            AnimatedMusicEqualizer(
+                                isPlaying = isPlayingAudio,
+                                barColor = if (isMine) MehfilGold else MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Voice message • ${message.mediaDurationSec}s",
+                                text = "Voice • ${message.mediaDurationSec}s",
                                 color = contentColor,
                                 style = MaterialTheme.typography.bodyMedium
                             )

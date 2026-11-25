@@ -15,11 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -41,11 +39,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.ui.components.MehfilLogoBadge
-import com.example.ui.theme.MehfilChampagne
-import com.example.ui.theme.MehfilDeepPurple
-import com.example.ui.theme.MehfilGold
-import com.example.ui.theme.MehfilMidnightPlum
-import com.example.ui.theme.MehfilRoyalPurple
+import com.example.ui.theme.MehfilIceWhite
+import com.example.ui.theme.MehfilNeonCyan
+import com.example.ui.theme.MehfilObsidian
+import com.example.ui.theme.MehfilSlateNight
+import com.example.ui.theme.MehfilSoftMuted
 import kotlinx.coroutines.delay
 
 @Composable
@@ -68,9 +66,9 @@ fun SplashScreen(
     LaunchedEffect(Unit) {
         contentAlpha.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 550, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)
         )
-        delay(900L)
+        delay(850L)
         onFinished()
     }
 
@@ -79,7 +77,7 @@ fun SplashScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(MehfilMidnightPlum, MehfilDeepPurple, MehfilRoyalPurple)
+                    listOf(MehfilObsidian, MehfilSlateNight, MehfilObsidian)
                 )
             )
     ) {
@@ -89,7 +87,21 @@ fun SplashScreen(
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
-                .alpha(0.45f)
+                .alpha(0.65f)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MehfilObsidian.copy(alpha = 0.25f),
+                            MehfilObsidian.copy(alpha = 0.45f),
+                            MehfilObsidian.copy(alpha = 0.8f)
+                        )
+                    )
+                )
         )
 
         Column(
@@ -97,7 +109,7 @@ fun SplashScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(horizontal = 32.dp, vertical = 36.dp),
+                .padding(horizontal = 32.dp, vertical = 42.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -113,17 +125,17 @@ fun SplashScreen(
                     color = Color.Transparent,
                     modifier = Modifier.scale(logoScale.value)
                 ) {
-                    MehfilLogoBadge(size = 128.dp)
+                    MehfilLogoBadge(size = 136.dp)
                 }
 
-                Spacer(modifier = Modifier.height(26.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
                     text = "Mehfil",
-                    color = MehfilChampagne,
+                    color = MehfilIceWhite,
                     style = MaterialTheme.typography.displaySmall.copy(
-                        fontSize = 42.sp,
-                        letterSpacing = 0.8.sp
+                        fontSize = 44.sp,
+                        letterSpacing = 0.6.sp
                     ),
                     fontWeight = FontWeight.Bold
                 )
@@ -131,8 +143,8 @@ fun SplashScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Yahan har baat ek Mehfil hai",
-                    color = MehfilGold,
+                    text = "Connect • Chat • Make Friends",
+                    color = MehfilSoftMuted,
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center
                 )
@@ -142,18 +154,16 @@ fun SplashScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.alpha(contentAlpha.value)
             ) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .width(150.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(50)),
-                    color = MehfilGold,
-                    trackColor = Color.White.copy(alpha = 0.18f)
+                CircularProgressIndicator(
+                    modifier = Modifier.size(34.dp),
+                    color = MehfilNeonCyan,
+                    trackColor = Color.White.copy(alpha = 0.14f),
+                    strokeWidth = 3.dp
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Party Rooms • Music Stage • HD Video",
-                    color = MehfilChampagne.copy(alpha = 0.78f),
+                    text = "Yahan har baat ek Mehfil hai",
+                    color = MehfilIceWhite.copy(alpha = 0.72f),
                     style = MaterialTheme.typography.labelMedium
                 )
             }

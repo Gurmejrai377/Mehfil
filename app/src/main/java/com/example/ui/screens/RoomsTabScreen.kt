@@ -117,12 +117,29 @@ fun RoomsTabScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(MehfilMidnightPlum, MehfilDeepPurple, MehfilMidnightPlum)
-                )
-            )
+            .background(MehfilMidnightPlum)
     ) {
+        Image(
+            painter = painterResource(id = R.drawable.img_party_stage),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(0.24f)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MehfilMidnightPlum.copy(alpha = 0.72f),
+                            MehfilDeepPurple.copy(alpha = 0.78f),
+                            MehfilMidnightPlum.copy(alpha = 0.92f)
+                        )
+                    )
+                )
+        )
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
                 title = {
@@ -568,7 +585,7 @@ private fun PartyRoomLobbyCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (room.isMusicPlaying && room.currentSongTitle.isNotBlank()) {
+                if (room.musicPlaying && room.currentSongTitle.isNotBlank()) {
                     Surface(
                         color = MehfilRoyalPurple.copy(alpha = 0.85f),
                         shape = RoundedCornerShape(12.dp),

@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,16 +48,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import com.example.R
 import com.example.data.CallType
 import com.example.data.Contact
+import com.example.data.PublicProfile
 import com.example.data.UiState
 import com.example.data.UserAccount
 import com.example.ui.components.MehfilAvatar
@@ -73,6 +80,7 @@ import com.example.ui.theme.MehfilRoyalPurple
 fun ContactsTabScreen(
     accountState: UiState<UserAccount?>,
     contactsState: UiState<List<Contact>>,
+    discoverableProfilesState: UiState<List<PublicProfile>>,
     onAddContact: (peerId: String, name: String, mehfilId: String, status: String, colorHex: String) -> Unit,
     onToggleFavorite: (Contact) -> Unit,
     onDeleteContact: (String) -> Unit,
@@ -94,15 +102,43 @@ fun ContactsTabScreen(
         }
     }
 
+    val filteredDirectory = remember(discoverableProfilesState, contactsState, searchQuery) {
+        val existingPeerIds = (contactsState as? UiState.Success)?.data.orEmpty().map { it.peerId }.toSet()
+        val profiles = (discoverableProfilesState as? UiState.Success)?.data.orEmpty()
+        val base = profiles.filter { it.userId !in existingPeerIds }
+        if (searchQuery.isBlank()) base
+        else base.filter {
+            it.displayName.contains(searchQuery, ignoreCase = true) ||
+                it.mehfilId.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(MehfilMidnightPlum, MehfilDeepPurple, MehfilMidnightPlum)
-                )
-            )
+            .background(MehfilMidnightPlum)
     ) {
+        Image(
+            painter = painterResource(id = R.drawable.img_party_stage),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(0.24f)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MehfilMidnightPlum.copy(alpha = 0.72f),
+                            MehfilDeepPurple.copy(alpha = 0.78f),
+                            MehfilMidnightPlum.copy(alpha = 0.92f)
+                        )
+                    )
+                )
+        )
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
                 title = {
@@ -287,6 +323,35 @@ fun ContactsTabScreen(
                         }
                     }
                 }
+
+                if (filteredDirectory.isNotEmpty()) {
+                    item(key = "discover_header") {
+                        Text(
+                            text = "LIVE ON MEHFIL (${filteredDirectory.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MehfilMint,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp)
+                        )
+                    }
+
+                    items(filteredDirectory, key = { "dir_${it.userId}" }) { profile ->
+                        DirectoryProfileRowItem(
+                            profile = profile,
+                            onAddFriend = {
+                                onAddContact(
+                                    profile.userId,
+                                    profile.displayName,
+                                    profile.mehfilId,
+                                    profile.statusText,
+                                    profile.avatarColorHex
+                                )
+                            },
+                            onChat = { onOpenChat(profile.userId, profile.displayName) },
+                            onVoiceCall = { onStartCall(profile.userId, profile.displayName, CallType.VOICE) },
+                            onVideoCall = { onStartCall(profile.userId, profile.displayName, CallType.VIDEO) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -383,6 +448,88 @@ private fun ContactRowItem(
                         modifier = Modifier.size(18.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DirectoryProfileRowItem(
+    profile: PublicProfile,
+    onAddFriend: () -> Unit,
+    onChat: () -> Unit,
+    onVoiceCall: () -> Unit,
+    onVideoCall: () -> Unit
+) {
+    MehfilGlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .testTag("directory_row_${profile.userId}"),
+        shape = RoundedCornerShape(20.dp),
+        onClick = onChat
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MehfilAvatar(
+                name = profile.displayName,
+                accentHex = profile.avatarColorHex,
+                size = 50.dp,
+                online = profile.online
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = profile.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${profile.mehfilId} • ${profile.statusText}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            IconButton(onClick = onAddFriend, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.PersonAdd,
+                    contentDescription = "Add ${profile.displayName}",
+                    tint = MehfilGold,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            IconButton(onClick = onChat, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.ChatBubbleOutline,
+                    contentDescription = "Message ${profile.displayName}",
+                    tint = MehfilChampagne,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            IconButton(onClick = onVoiceCall, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.Call,
+                    contentDescription = "Voice call ${profile.displayName}",
+                    tint = MehfilMint,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            IconButton(onClick = onVideoCall, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.Videocam,
+                    contentDescription = "Video call ${profile.displayName}",
+                    tint = MehfilGold,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
     }

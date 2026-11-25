@@ -1,11 +1,14 @@
 package com.example.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.ChatMessage
 import com.example.data.MehfilRepository
 import com.example.data.MessageType
 import com.example.data.UiState
+import com.example.data.unwrapFirestoreError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,10 +25,13 @@ class ChatDetailViewModel(
 ) : ViewModel() {
 
     val messagesState: StateFlow<UiState<List<ChatMessage>>> =
-        repository.observeMessages(chatId)
+        repository.observeMessages(chatId, currentUserId)
             .map<List<ChatMessage>, UiState<List<ChatMessage>>> { UiState.Success(it) }
             .catch { error ->
-                emit(UiState.Error(error.localizedMessage ?: "Failed to load messages"))
+                val unwrapped = unwrapFirestoreError(error)
+                if (unwrapped is CancellationException) throw unwrapped
+                Log.w("ChatDetailVM", "Error observing messages", unwrapped)
+                emit(UiState.Error(unwrapped.message ?: "Failed to load messages"))
             }
             .stateIn(
                 scope = viewModelScope,
@@ -33,7 +39,7 @@ class ChatDetailViewModel(
                 initialValue = UiState.Loading
             )
 
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events = _events.asSharedFlow()
 
     fun sendText(senderName: String, text: String) {
@@ -51,7 +57,7 @@ class ChatDetailViewModel(
         }
     }
 
-    fun sendVoiceNote(senderName: String, durationSec: Long) {
+    fun sendVoiceNote(senderName: String, audioBase64: String?, durationSec: Long) {
         viewModelScope.launch {
             repository.sendMessage(
                 chatId = chatId,
@@ -59,7 +65,8 @@ class ChatDetailViewModel(
                 senderName = senderName,
                 messageType = MessageType.VOICE,
                 text = "Voice note",
-                mediaDurationSec = durationSec.coerceAtLeast(1L)
+                mediaDurationSec = durationSec.coerceAtLeast(1L),
+                audioDataBase64 = audioBase64
             ).onFailure {
                 _events.emit(it.localizedMessage ?: "Voice note failed to send")
             }
@@ -83,7 +90,7 @@ class ChatDetailViewModel(
 
     fun reactToMessage(messageId: String, emoji: String) {
         viewModelScope.launch {
-            repository.reactToMessage(messageId, emoji)
+            repository.reactToMessage(chatId, messageId, emoji)
                 .onFailure { _events.emit(it.localizedMessage ?: "Could not add reaction") }
         }
     }

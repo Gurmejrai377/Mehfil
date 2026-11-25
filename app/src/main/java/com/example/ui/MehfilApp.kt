@@ -1,9 +1,7 @@
 package com.example.ui
 
 import android.net.Uri
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,9 +17,7 @@ import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -38,14 +34,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -60,11 +56,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.data.CallQualityMode
 import com.example.data.CallType
-import com.example.data.MehfilDatabase
 import com.example.data.MehfilRepository
 import com.example.data.Story
 import com.example.data.UiState
 import com.example.data.UserAccount
+import com.example.ui.components.IncomingCallOverlay
 import com.example.ui.components.ProfileSettingsSheet
 import com.example.ui.components.StoryViewerDialog
 import com.example.ui.screens.ActiveCallScreen
@@ -85,7 +81,9 @@ import com.example.ui.theme.MehfilRoyalPurple
 import com.example.viewmodel.ChatDetailViewModel
 import com.example.viewmodel.MehfilViewModel
 import com.example.viewmodel.PartyRoomViewModel
-import com.example.viewmodel.SessionViewModel
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.auth
 
 private const val ROUTE_CHATS = "chats"
 private const val ROUTE_ROOMS = "rooms"
@@ -137,84 +135,89 @@ private val MEHFIL_TABS = listOf(
 @Composable
 fun MehfilApp() {
     var showSplash by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    val sessionViewModel: SessionViewModel = viewModel(
-        factory = viewModelFactory {
-            initializer {
-                val app = checkNotNull(this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
-                val dao = MehfilDatabase.getInstance(app).mehfilDao()
-                SessionViewModel(MehfilRepository(dao))
-            }
-        }
-    )
+    val currentUser by remember {
+        Firebase.auth.authStateFlow()
+    }.collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
 
     if (showSplash) {
         SplashScreen(onFinished = { showSplash = false })
         return
     }
 
-    val activeUserState by sessionViewModel.activeUser.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        attemptAutoSignIn(
+            context = context,
+            credentialManager = CredentialManager.create(context),
+            onAuthSuccess = {},
+            onUnauthenticated = {},
+            scope = scope
+        )
+    }
 
-    when (val state = activeUserState) {
-        is UiState.Loading -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Brush.verticalGradient(listOf(MehfilMidnightPlum, MehfilDeepPurple))),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = MehfilGold)
-            }
-        }
-        is UiState.Error -> {
-            LoginScreen(
-                onGuestLogin = sessionViewModel::loginAsGuest,
-                onPhoneOtpLogin = sessionViewModel::loginWithPhoneOtp
-            )
-        }
-        is UiState.Success -> {
-            val account = state.data
-            if (account == null) {
-                LoginScreen(
-                    onGuestLogin = sessionViewModel::loginAsGuest,
-                    onPhoneOtpLogin = sessionViewModel::loginWithPhoneOtp
-                )
-            } else {
-                key(account.userId) {
-                    AuthenticatedMehfilShell(
-                        initialAccount = account,
-                        onSignOut = sessionViewModel::signOut
+    val user = currentUser
+    if (user == null) {
+        LoginScreen(onAuthSuccess = {})
+    } else {
+        key(user.uid) {
+            AuthenticatedMehfilShell(
+                firebaseUser = user,
+                onSignOut = {
+                    signOutWithCredentialManager(
+                        context = context,
+                        scope = scope
                     )
                 }
-            }
+            )
         }
     }
 }
 
 @Composable
 private fun AuthenticatedMehfilShell(
-    initialAccount: UserAccount,
+    firebaseUser: FirebaseUser,
     onSignOut: () -> Unit
 ) {
+    val context = LocalContext.current
+    val callRepository = remember(context) { MehfilRepository(context.applicationContext) }
+
+    val fallbackAccount = remember(firebaseUser.uid) {
+        val rawName = firebaseUser.displayName?.trim().takeIf { !it.isNullOrBlank() }
+            ?: firebaseUser.email?.substringBefore("@")
+            ?: "Mehfil Member"
+        val cleanHandle = rawName.lowercase().replace(Regex("[^a-z0-9]"), "").take(8).ifBlank { "member" }
+        UserAccount(
+            id = firebaseUser.uid,
+            userId = firebaseUser.uid,
+            displayName = rawName,
+            email = firebaseUser.email,
+            mehfilId = "mehfil_${cleanHandle}_${firebaseUser.uid.takeLast(4).lowercase()}",
+            bio = "Yahan har baat ek Mehfil hai"
+        )
+    }
+
     val mehfilViewModel: MehfilViewModel = viewModel(
-        key = "mehfil_${initialAccount.userId}",
+        key = "mehfil_${firebaseUser.uid}",
         factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
-                val dao = MehfilDatabase.getInstance(app).mehfilDao()
-                MehfilViewModel(MehfilRepository(dao), initialAccount.userId)
+                MehfilViewModel(MehfilRepository(app.applicationContext), firebaseUser.uid)
             }
         }
     )
 
     val accountState by mehfilViewModel.userAccount.collectAsStateWithLifecycle()
+    val discoverableProfilesState by mehfilViewModel.discoverableProfilesState.collectAsStateWithLifecycle()
     val chatsState by mehfilViewModel.chatsState.collectAsStateWithLifecycle()
     val contactsState by mehfilViewModel.contactsState.collectAsStateWithLifecycle()
     val callsState by mehfilViewModel.callsState.collectAsStateWithLifecycle()
+    val incomingCall by mehfilViewModel.incomingCall.collectAsStateWithLifecycle()
     val storiesState by mehfilViewModel.storiesState.collectAsStateWithLifecycle()
     val roomsState by mehfilViewModel.partyRoomsState.collectAsStateWithLifecycle()
 
-    val account = (accountState as? UiState.Success)?.data ?: initialAccount
+    val account = (accountState as? UiState.Success)?.data ?: fallbackAccount
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -349,6 +352,7 @@ private fun AuthenticatedMehfilShell(
                 ) {
                     composable(ROUTE_CHATS) {
                         ChatsTabScreen(
+                            currentUserId = account.userId,
                             accountState = accountState,
                             chatsState = chatsState,
                             storiesState = storiesState,
@@ -363,6 +367,24 @@ private fun AuthenticatedMehfilShell(
                             },
                             onGoToContacts = {
                                 navController.navigate(ROUTE_CONTACTS) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            onGoToRooms = {
+                                navController.navigate(ROUTE_ROOMS) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            onGoToCalls = {
+                                navController.navigate(ROUTE_CALLS) {
                                     popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
                                     }
@@ -397,6 +419,7 @@ private fun AuthenticatedMehfilShell(
                         ContactsTabScreen(
                             accountState = accountState,
                             contactsState = contactsState,
+                            discoverableProfilesState = discoverableProfilesState,
                             onAddContact = mehfilViewModel::addContact,
                             onToggleFavorite = mehfilViewModel::toggleFavorite,
                             onDeleteContact = mehfilViewModel::deleteContact,
@@ -421,9 +444,8 @@ private fun AuthenticatedMehfilShell(
                             factory = viewModelFactory {
                                 initializer {
                                     val app = checkNotNull(this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
-                                    val dao = MehfilDatabase.getInstance(app).mehfilDao()
                                     PartyRoomViewModel(
-                                        repository = MehfilRepository(dao),
+                                        repository = MehfilRepository(app.applicationContext),
                                         roomId = roomId,
                                         currentUserId = account.userId,
                                         currentUserName = account.displayName
@@ -454,9 +476,8 @@ private fun AuthenticatedMehfilShell(
                             factory = viewModelFactory {
                                 initializer {
                                     val app = checkNotNull(this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
-                                    val dao = MehfilDatabase.getInstance(app).mehfilDao()
                                     ChatDetailViewModel(
-                                        repository = MehfilRepository(dao),
+                                        repository = MehfilRepository(app.applicationContext),
                                         chatId = chatId,
                                         currentUserId = account.userId
                                     )
@@ -494,6 +515,9 @@ private fun AuthenticatedMehfilShell(
                         val qualityMode = CallQualityMode.fromRaw(backStackEntry.arguments?.getString("qualityMode"))
 
                         ActiveCallScreen(
+                            repository = callRepository,
+                            currentUserId = account.userId,
+                            callId = callId,
                             peerId = peerId,
                             peerName = peerName,
                             initialCallType = callType,
@@ -517,6 +541,22 @@ private fun AuthenticatedMehfilShell(
                 }
             }
         }
+    }
+
+    val ringingCall = incomingCall
+    if (ringingCall != null && currentRoute?.startsWith("active_call/") != true) {
+        IncomingCallOverlay(
+            call = ringingCall,
+            onAccept = {
+                mehfilViewModel.acceptIncomingCall(ringingCall) { callId, peerId, peerName, callType, quality ->
+                    val route = "active_call/${Uri.encode(callId)}/${Uri.encode(peerId)}/${Uri.encode(peerName)}/${callType.name}/${quality.name}"
+                    navController.navigate(route)
+                }
+            },
+            onDecline = {
+                mehfilViewModel.declineIncomingCall(ringingCall)
+            }
+        )
     }
 
     if (showProfileSheet) {

@@ -36,10 +36,11 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
              (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
-             data.waveId is string && data.waveId.size() >= 3 && data.waveId.size() <= 40 &&
+             data.mehfilId is string && data.mehfilId.size() >= 3 && data.mehfilId.size() <= 40 &&
              data.bio is string && data.bio.size() <= 160 &&
              data.online is bool &&
              data.lowDataMode is bool &&
+             data.coinBalance is int && data.coinBalance >= 0 && data.coinBalance <= 10000000 &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -47,7 +48,7 @@ service cloud.firestore {
     function isValidPublicProfile(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
-             data.waveId is string && data.waveId.size() >= 3 && data.waveId.size() <= 40 &&
+             data.mehfilId is string && data.mehfilId.size() >= 3 && data.mehfilId.size() <= 40 &&
              data.statusText is string && data.statusText.size() <= 120 &&
              data.avatarColorHex is string && data.avatarColorHex.size() >= 4 && data.avatarColorHex.size() <= 10 &&
              data.online is bool &&
@@ -60,7 +61,7 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.peerId is string && data.peerId.size() >= 1 && data.peerId.size() <= 128 &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
-             data.waveId is string && data.waveId.size() >= 1 && data.waveId.size() <= 40 &&
+             data.mehfilId is string && data.mehfilId.size() >= 1 && data.mehfilId.size() <= 40 &&
              data.statusText is string && data.statusText.size() <= 120 &&
              data.avatarColorHex is string && data.avatarColorHex.size() >= 4 && data.avatarColorHex.size() <= 10 &&
              data.online is bool &&
@@ -95,7 +96,8 @@ service cloud.firestore {
              data.messageType in ['TEXT', 'VOICE', 'IMAGE', 'CALL'] &&
              data.text is string && data.text.size() <= 1000 &&
              data.mediaDurationSec is int && data.mediaDurationSec >= 0 && data.mediaDurationSec <= 600 &&
-             (!('imageDataBase64' in data) || (data.imageDataBase64 is string && data.imageDataBase64.size() <= 80000)) &&
+             (!('imageDataBase64' in data) || (data.imageDataBase64 is string && data.imageDataBase64.size() <= 150000)) &&
+             (!('audioDataBase64' in data) || (data.audioDataBase64 is string && data.audioDataBase64.size() <= 250000)) &&
              (!('reaction' in data) || (data.reaction is string && data.reaction.size() <= 16)) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
@@ -112,8 +114,21 @@ service cloud.firestore {
              data.status in ['RINGING', 'ACTIVE', 'ENDED', 'MISSED', 'DECLINED'] &&
              data.qualityMode in ['HD', 'LOW_DATA'] &&
              data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 86400 &&
+             (!('offerSdp' in data) || (data.offerSdp is string && data.offerSdp.size() <= 30000)) &&
+             (!('answerSdp' in data) || (data.answerSdp is string && data.answerSdp.size() <= 30000)) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCallCandidate(data) {
+      return data.callId is string && data.callId.size() >= 1 && data.callId.size() <= 128 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.participantUids is list && data.participantUids.size() >= 1 && data.participantUids.size() <= 4 &&
+             data.participantUids[0] is string &&
+             data.sdpMid is string && data.sdpMid.size() <= 64 &&
+             data.sdpMLineIndex is int && data.sdpMLineIndex >= 0 && data.sdpMLineIndex <= 32 &&
+             data.sdpCandidate is string && data.sdpCandidate.size() >= 1 && data.sdpCandidate.size() <= 4096 &&
+             isValidTimestamp(data.createdAt);
     }
 
     function isValidStory(data) {
@@ -122,12 +137,74 @@ service cloud.firestore {
              data.caption is string && data.caption.size() >= 1 && data.caption.size() <= 200 &&
              data.moodEmoji is string && data.moodEmoji.size() >= 1 && data.moodEmoji.size() <= 16 &&
              data.accentHex is string && data.accentHex.size() >= 4 && data.accentHex.size() <= 10 &&
-             data.viewerUids is list && data.viewerUids.size() >= 1 && data.viewerUids.size() <= 50 &&
-             data.viewerUids[0] is string &&
-             data.ownerId in data.viewerUids &&
-             data.viewCount is int && data.viewCount >= 0 && data.viewCount <= 100000 &&
+             data.discoverable is bool &&
+             data.viewCount is int && data.viewCount >= 0 && data.viewCount <= 1000000 &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPartyRoom(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             data.roomType in ['MUSIC', 'PARTY', 'CHAT', 'LIVE'] &&
+             data.hostId is string && data.hostId.size() >= 1 && data.hostId.size() <= 128 &&
+             data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 60 &&
+             data.topic is string && data.topic.size() <= 120 &&
+             data.publicRoom is bool &&
+             data.activeMemberUids is list && data.activeMemberUids.size() <= 50 &&
+             (data.activeMemberUids.size() == 0 || data.activeMemberUids[0] is string) &&
+             data.viewerCount is int && data.viewerCount >= 0 && data.viewerCount <= 100000 &&
+             data.currentSongTitle is string && data.currentSongTitle.size() <= 120 &&
+             data.musicPlaying is bool &&
+             data.hostMicOn is bool &&
+             data.totalGiftCoins is int && data.totalGiftCoins >= 0 && data.totalGiftCoins <= 100000000 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidRoomSeat(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.seatIndex is int && data.seatIndex >= 0 && data.seatIndex <= 7 &&
+             data.publicRoom is bool &&
+             (!('occupantId' in data) || (data.occupantId is string && data.occupantId.size() >= 1 && data.occupantId.size() <= 128)) &&
+             (!('occupantName' in data) || (data.occupantName is string && data.occupantName.size() >= 1 && data.occupantName.size() <= 60)) &&
+             data.avatarColorHex is string && data.avatarColorHex.size() >= 4 && data.avatarColorHex.size() <= 10 &&
+             data.muted is bool &&
+             data.giftCoins is int && data.giftCoins >= 0 && data.giftCoins <= 100000000 &&
+             (!('lastReaction' in data) || (data.lastReaction is string && data.lastReaction.size() <= 16)) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidRoomMessage(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.kind in ['TEXT', 'GIFT', 'SONG_REQUEST', 'REACTION', 'SYSTEM'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 400 &&
+             data.publicRoom is bool &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidRoomSong(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
+             data.artist is string && data.artist.size() >= 1 && data.artist.size() <= 60 &&
+             data.requestedBy is string && data.requestedBy.size() >= 1 && data.requestedBy.size() <= 60 &&
+             data.requestedByUid is string && data.requestedByUid.size() >= 1 && data.requestedByUid.size() <= 128 &&
+             data.playing is bool &&
+             data.publicRoom is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidRoomSignal(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.fromUid is string && data.fromUid.size() >= 1 && data.fromUid.size() <= 128 &&
+             data.toUid is string && data.toUid.size() >= 1 && data.toUid.size() <= 128 &&
+             data.participantUids is list && data.participantUids.size() == 2 &&
+             data.participantUids[0] is string && data.participantUids[1] is string &&
+             data.signalType in ['OFFER', 'ANSWER', 'ICE'] &&
+             data.payload is string && data.payload.size() >= 1 && data.payload.size() <= 30000 &&
+             isValidTimestamp(data.createdAt);
     }
 
     // 1. Private User Accounts (/users/{userId})
@@ -138,8 +215,8 @@ service cloud.firestore {
       allow create: if isOwner(userId) &&
                        isValidId(userId) &&
                        incoming().userId == request.auth.uid &&
-                       incoming().keys().hasAll(['userId', 'displayName', 'waveId', 'bio', 'online', 'lowDataMode', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'waveId', 'bio', 'online', 'lowDataMode', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'mehfilId', 'bio', 'online', 'lowDataMode', 'coinBalance', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'mehfilId', 'bio', 'online', 'lowDataMode', 'coinBalance', 'createdAt', 'updatedAt']) &&
                        isValidUserAccount(incoming());
 
       allow update: if isOwner(userId) &&
@@ -147,7 +224,7 @@ service cloud.firestore {
                        isValidUserAccount(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'waveId', 'bio', 'online', 'lowDataMode', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'mehfilId', 'bio', 'online', 'lowDataMode', 'coinBalance', 'updatedAt']);
 
       allow delete: if isOwner(userId) && isValidId(userId);
 
@@ -159,8 +236,8 @@ service cloud.firestore {
         allow create: if isOwner(userId) &&
                          isValidId(contactId) &&
                          incoming().userId == request.auth.uid &&
-                         incoming().keys().hasAll(['userId', 'peerId', 'displayName', 'waveId', 'statusText', 'avatarColorHex', 'online', 'favorite', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'peerId', 'displayName', 'waveId', 'statusText', 'avatarColorHex', 'online', 'favorite', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasAll(['userId', 'peerId', 'displayName', 'mehfilId', 'statusText', 'avatarColorHex', 'online', 'favorite', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'peerId', 'displayName', 'mehfilId', 'statusText', 'avatarColorHex', 'online', 'favorite', 'createdAt', 'updatedAt']) &&
                          isValidContact(incoming());
 
         allow update: if isOwner(userId) &&
@@ -169,7 +246,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().peerId == existing().peerId &&
                          incoming().createdAt == existing().createdAt &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'waveId', 'statusText', 'avatarColorHex', 'online', 'favorite', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'mehfilId', 'statusText', 'avatarColorHex', 'online', 'favorite', 'updatedAt']);
 
         allow delete: if isOwner(userId) && isValidId(contactId);
       }
@@ -183,8 +260,8 @@ service cloud.firestore {
       allow create: if isOwner(profileId) &&
                        isValidId(profileId) &&
                        incoming().userId == request.auth.uid &&
-                       incoming().keys().hasAll(['userId', 'displayName', 'waveId', 'statusText', 'avatarColorHex', 'online', 'discoverable', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'waveId', 'statusText', 'avatarColorHex', 'online', 'discoverable', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'mehfilId', 'statusText', 'avatarColorHex', 'online', 'discoverable', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'mehfilId', 'statusText', 'avatarColorHex', 'online', 'discoverable', 'createdAt', 'updatedAt']) &&
                        isValidPublicProfile(incoming());
 
       allow update: if isOwner(profileId) &&
@@ -192,7 +269,7 @@ service cloud.firestore {
                        isValidPublicProfile(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'waveId', 'statusText', 'avatarColorHex', 'online', 'discoverable', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'mehfilId', 'statusText', 'avatarColorHex', 'online', 'discoverable', 'updatedAt']);
 
       allow delete: if isOwner(profileId) && isValidId(profileId);
     }
@@ -231,8 +308,10 @@ service cloud.firestore {
                          incoming().chatId == chatId &&
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().participantUids) &&
+                         (request.auth.uid in getAfter(/databases/$(database)/documents/chats/$(chatId)).data.participantUids) &&
+                         incoming().participantUids == getAfter(/databases/$(database)/documents/chats/$(chatId)).data.participantUids &&
                          incoming().keys().hasAll(['chatId', 'senderId', 'senderName', 'participantUids', 'messageType', 'text', 'mediaDurationSec', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['chatId', 'senderId', 'senderName', 'participantUids', 'messageType', 'text', 'mediaDurationSec', 'imageDataBase64', 'reaction', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['chatId', 'senderId', 'senderName', 'participantUids', 'messageType', 'text', 'mediaDurationSec', 'imageDataBase64', 'audioDataBase64', 'reaction', 'createdAt', 'updatedAt']) &&
                          isValidChatMessage(incoming());
 
         allow update: if isSignedIn() &&
@@ -261,7 +340,7 @@ service cloud.firestore {
                        (request.auth.uid in incoming().participantUids) &&
                        incoming().status in ['RINGING', 'ACTIVE'] &&
                        incoming().keys().hasAll(['callerId', 'callerName', 'calleeId', 'calleeName', 'participantUids', 'callType', 'status', 'qualityMode', 'durationSeconds', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['callerId', 'callerName', 'calleeId', 'calleeName', 'participantUids', 'callType', 'status', 'qualityMode', 'durationSeconds', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['callerId', 'callerName', 'calleeId', 'calleeName', 'participantUids', 'callType', 'status', 'qualityMode', 'durationSeconds', 'offerSdp', 'answerSdp', 'createdAt', 'updatedAt']) &&
                        isValidCallRecord(incoming());
 
       // Terminal State Locking: ENDED, MISSED, DECLINED cannot be mutated
@@ -275,34 +354,189 @@ service cloud.firestore {
                        incoming().participantUids == existing().participantUids &&
                        incoming().callType == existing().callType &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'qualityMode', 'durationSeconds', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'qualityMode', 'durationSeconds', 'offerSdp', 'answerSdp', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(callId) && (request.auth.uid in existing().participantUids);
+
+      // 4a. WebRTC ICE Candidates (/calls/{callId}/candidates/{candidateId})
+      match /candidates/{candidateId} {
+        allow get: if isSignedIn() && isValidId(callId) && isValidId(candidateId) && (request.auth.uid in resource.data.participantUids);
+        allow list: if isSignedIn() && (request.auth.uid in resource.data.participantUids);
+
+        allow create: if isSignedIn() &&
+                         isValidId(callId) &&
+                         isValidId(candidateId) &&
+                         incoming().callId == callId &&
+                         incoming().senderId == request.auth.uid &&
+                         (request.auth.uid in incoming().participantUids) &&
+                         (request.auth.uid in getAfter(/databases/$(database)/documents/calls/$(callId)).data.participantUids) &&
+                         incoming().participantUids == getAfter(/databases/$(database)/documents/calls/$(callId)).data.participantUids &&
+                         incoming().keys().hasAll(['callId', 'senderId', 'participantUids', 'sdpMid', 'sdpMLineIndex', 'sdpCandidate', 'createdAt']) &&
+                         incoming().keys().hasOnly(['callId', 'senderId', 'participantUids', 'sdpMid', 'sdpMLineIndex', 'sdpCandidate', 'createdAt']) &&
+                         isValidCallCandidate(incoming());
+
+        allow delete: if isSignedIn() && isValidId(callId) && isValidId(candidateId) && (request.auth.uid in existing().participantUids);
+      }
     }
 
     // 5. Status Stories (/stories/{storyId})
     match /stories/{storyId} {
-      allow get: if isSignedIn() && isValidId(storyId) && (request.auth.uid in resource.data.viewerUids);
-      allow list: if isSignedIn() && (request.auth.uid in resource.data.viewerUids);
+      allow get: if isSignedIn() && isValidId(storyId) && resource.data.discoverable == true;
+      allow list: if isSignedIn() && resource.data.discoverable == true;
 
       allow create: if isSignedIn() &&
                        isValidId(storyId) &&
                        incoming().ownerId == request.auth.uid &&
-                       (request.auth.uid in incoming().viewerUids) &&
-                       incoming().keys().hasAll(['ownerId', 'ownerName', 'caption', 'moodEmoji', 'accentHex', 'viewerUids', 'viewCount', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['ownerId', 'ownerName', 'caption', 'moodEmoji', 'accentHex', 'viewerUids', 'viewCount', 'createdAt', 'updatedAt']) &&
+                       incoming().discoverable == true &&
+                       incoming().keys().hasAll(['ownerId', 'ownerName', 'caption', 'moodEmoji', 'accentHex', 'discoverable', 'viewCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ownerId', 'ownerName', 'caption', 'moodEmoji', 'accentHex', 'discoverable', 'viewCount', 'createdAt', 'updatedAt']) &&
                        isValidStory(incoming());
 
       allow update: if isSignedIn() &&
                        isValidId(storyId) &&
                        isValidStory(incoming()) &&
                        incoming().ownerId == existing().ownerId &&
+                       incoming().discoverable == existing().discoverable &&
                        incoming().createdAt == existing().createdAt && (
-                         (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'moodEmoji', 'accentHex', 'viewerUids', 'viewCount', 'updatedAt'])) ||
-                         ((request.auth.uid in existing().viewerUids) && incoming().diff(existing()).affectedKeys().hasOnly(['viewCount', 'updatedAt']))
+                         (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'moodEmoji', 'accentHex', 'viewCount', 'updatedAt'])) ||
+                         (existing().discoverable == true && incoming().viewCount >= existing().viewCount && incoming().diff(existing()).affectedKeys().hasOnly(['viewCount', 'updatedAt']))
                        );
 
       allow delete: if isSignedIn() && isValidId(storyId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 6. Live Party Rooms (/rooms/{roomId})
+    match /rooms/{roomId} {
+      allow get: if isSignedIn() && isValidId(roomId);
+      allow list: if isSignedIn() && resource.data.publicRoom == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       incoming().hostId == request.auth.uid &&
+                       incoming().publicRoom == true &&
+                       incoming().keys().hasAll(['name', 'roomType', 'hostId', 'hostName', 'topic', 'publicRoom', 'activeMemberUids', 'viewerCount', 'currentSongTitle', 'musicPlaying', 'hostMicOn', 'totalGiftCoins', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['name', 'roomType', 'hostId', 'hostName', 'topic', 'publicRoom', 'activeMemberUids', 'viewerCount', 'currentSongTitle', 'musicPlaying', 'hostMicOn', 'totalGiftCoins', 'createdAt', 'updatedAt']) &&
+                       isValidPartyRoom(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       isValidPartyRoom(incoming()) &&
+                       incoming().hostId == existing().hostId &&
+                       incoming().hostName == existing().hostName &&
+                       incoming().roomType == existing().roomType &&
+                       incoming().publicRoom == existing().publicRoom &&
+                       incoming().createdAt == existing().createdAt && (
+                         (existing().hostId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'topic', 'activeMemberUids', 'viewerCount', 'currentSongTitle', 'musicPlaying', 'hostMicOn', 'totalGiftCoins', 'updatedAt'])) ||
+                         (existing().publicRoom == true && incoming().totalGiftCoins >= existing().totalGiftCoins && incoming().diff(existing()).affectedKeys().hasOnly(['activeMemberUids', 'viewerCount', 'totalGiftCoins', 'currentSongTitle', 'musicPlaying', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(roomId) && existing().hostId == request.auth.uid;
+
+      // 6a. Mic Seats (/rooms/{roomId}/seats/{seatId})
+      match /seats/{seatId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(seatId);
+        allow list: if isSignedIn() && resource.data.publicRoom == true;
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(seatId) &&
+                         incoming().roomId == roomId &&
+                         incoming().publicRoom == true &&
+                         incoming().keys().hasAll(['roomId', 'seatIndex', 'publicRoom', 'avatarColorHex', 'muted', 'giftCoins', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'seatIndex', 'publicRoom', 'occupantId', 'occupantName', 'avatarColorHex', 'muted', 'giftCoins', 'lastReaction', 'updatedAt']) &&
+                         isValidRoomSeat(incoming()) &&
+                         get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(seatId) &&
+                         isValidRoomSeat(incoming()) &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().seatIndex == existing().seatIndex &&
+                         incoming().publicRoom == existing().publicRoom && (
+                           // Claim empty seat
+                           (!('occupantId' in existing()) && incoming().occupantId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['occupantId', 'occupantName', 'avatarColorHex', 'muted', 'lastReaction', 'updatedAt'])) ||
+                           // Vacate own seat
+                           (('occupantId' in existing()) && existing().occupantId == request.auth.uid && !('occupantId' in incoming()) && !('occupantName' in incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['occupantId', 'occupantName', 'muted', 'lastReaction', 'updatedAt'])) ||
+                           // Mute/unmute or react on own seat
+                           (('occupantId' in existing()) && existing().occupantId == request.auth.uid && incoming().occupantId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['muted', 'lastReaction', 'updatedAt'])) ||
+                           // Send gifts to seat
+                           (('occupantId' in existing()) && incoming().occupantId == existing().occupantId && incoming().giftCoins >= existing().giftCoins && incoming().diff(existing()).affectedKeys().hasOnly(['giftCoins', 'updatedAt'])) ||
+                           // Host moderates seat
+                           (get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['occupantId', 'occupantName', 'muted', 'lastReaction', 'giftCoins', 'updatedAt']))
+                         );
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(seatId) &&
+                         get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
+      }
+
+      // 6b. Live Room Chat / Gifts / Reactions (/rooms/{roomId}/messages/{messageId})
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(messageId);
+        allow list: if isSignedIn() && resource.data.publicRoom == true;
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         incoming().roomId == roomId &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().publicRoom == true &&
+                         incoming().keys().hasAll(['roomId', 'senderId', 'senderName', 'kind', 'text', 'publicRoom', 'createdAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'kind', 'text', 'publicRoom', 'createdAt']) &&
+                         isValidRoomMessage(incoming()) &&
+                         exists(/databases/$(database)/documents/rooms/$(roomId));
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(messageId) &&
+                         (existing().senderId == request.auth.uid || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid);
+      }
+
+      // 6c. DJ Music Queue (/rooms/{roomId}/songs/{songId})
+      match /songs/{songId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(songId);
+        allow list: if isSignedIn() && resource.data.publicRoom == true;
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(songId) &&
+                         incoming().roomId == roomId &&
+                         incoming().requestedByUid == request.auth.uid &&
+                         incoming().publicRoom == true &&
+                         incoming().keys().hasAll(['roomId', 'title', 'artist', 'requestedBy', 'requestedByUid', 'playing', 'publicRoom', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'title', 'artist', 'requestedBy', 'requestedByUid', 'playing', 'publicRoom', 'createdAt', 'updatedAt']) &&
+                         isValidRoomSong(incoming()) &&
+                         exists(/databases/$(database)/documents/rooms/$(roomId));
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(songId) &&
+                         isValidRoomSong(incoming()) &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().requestedByUid == existing().requestedByUid &&
+                         incoming().publicRoom == existing().publicRoom &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['playing', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(songId) &&
+                         (existing().requestedByUid == request.auth.uid || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid);
+      }
+
+      // 6d. WebRTC Audio Stage Signaling (/rooms/{roomId}/signals/{signalId})
+      match /signals/{signalId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(signalId) && (request.auth.uid in resource.data.participantUids);
+        allow list: if isSignedIn() && (request.auth.uid in resource.data.participantUids);
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(signalId) &&
+                         incoming().roomId == roomId &&
+                         incoming().fromUid == request.auth.uid &&
+                         (request.auth.uid in incoming().participantUids) &&
+                         incoming().keys().hasAll(['roomId', 'fromUid', 'toUid', 'participantUids', 'signalType', 'payload', 'createdAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'fromUid', 'toUid', 'participantUids', 'signalType', 'payload', 'createdAt']) &&
+                         isValidRoomSignal(incoming());
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(signalId) && (request.auth.uid in existing().participantUids);
+      }
     }
   }
 }

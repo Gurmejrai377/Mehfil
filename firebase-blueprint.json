@@ -2,71 +2,72 @@
   "entities": {
     "UserAccount": {
       "title": "UserAccount",
-      "description": "Private user account settings and PII isolated to owner.",
+      "description": "Private authenticated Mehfil user account and preferences.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID of the owner." },
         "displayName": { "type": "string", "description": "User display name." },
         "email": { "type": "string", "description": "Private Google account email." },
-        "waveId": { "type": "string", "description": "Unique shareable WaveCall handle." },
-        "bio": { "type": "string", "description": "Short status bio." },
+        "mehfilId": { "type": "string", "description": "Shareable Mehfil handle." },
+        "bio": { "type": "string", "description": "User status bio." },
         "online": { "type": "boolean", "description": "Online presence flag." },
-        "lowDataMode": { "type": "boolean", "description": "Prefer low-bandwidth call optimization." },
+        "lowDataMode": { "type": "boolean", "description": "Prefer low-bandwidth call mode." },
+        "coinBalance": { "type": "integer", "description": "Mehfil gift coin wallet balance." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
-      "required": ["userId", "displayName", "waveId", "online", "lowDataMode", "createdAt", "updatedAt"]
+      "required": ["userId", "displayName", "mehfilId", "bio", "online", "lowDataMode", "coinBalance", "createdAt", "updatedAt"]
     },
     "PublicProfile": {
       "title": "PublicProfile",
-      "description": "Publicly discoverable WaveCall profile without PII.",
+      "description": "Publicly discoverable Mehfil profile without PII.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID." },
         "displayName": { "type": "string", "description": "Public display name." },
-        "waveId": { "type": "string", "description": "Shareable WaveCall handle." },
-        "statusText": { "type": "string", "description": "Current mood or availability status." },
-        "avatarColorHex": { "type": "string", "description": "Hex accent color for avatar." },
-        "online": { "type": "boolean", "description": "Whether user is currently active." },
-        "discoverable": { "type": "boolean", "description": "Whether user appears in WaveCall directory." },
+        "mehfilId": { "type": "string", "description": "Shareable Mehfil handle." },
+        "statusText": { "type": "string", "description": "Current status bio." },
+        "avatarColorHex": { "type": "string", "description": "Avatar badge accent hex." },
+        "online": { "type": "boolean", "description": "Current online flag." },
+        "discoverable": { "type": "boolean", "description": "Whether user appears in Mehfil people directory." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
-      "required": ["userId", "displayName", "waveId", "statusText", "avatarColorHex", "online", "discoverable", "createdAt", "updatedAt"]
+      "required": ["userId", "displayName", "mehfilId", "statusText", "avatarColorHex", "online", "discoverable", "createdAt", "updatedAt"]
     },
     "Contact": {
       "title": "Contact",
-      "description": "Saved WaveCall contact in user's personal address book.",
+      "description": "Saved contact in user personal address book.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Owner UID." },
-        "peerId": { "type": "string", "description": "Contact UID or channel identifier." },
+        "peerId": { "type": "string", "description": "Peer UID." },
         "displayName": { "type": "string", "description": "Contact display name." },
-        "waveId": { "type": "string", "description": "Contact WaveCall handle." },
+        "mehfilId": { "type": "string", "description": "Contact Mehfil ID." },
         "statusText": { "type": "string", "description": "Contact status tagline." },
-        "avatarColorHex": { "type": "string", "description": "Avatar badge hex color." },
-        "online": { "type": "boolean", "description": "Online presence indicator." },
-        "favorite": { "type": "boolean", "description": "Pinned to quick-dial favorites." },
+        "avatarColorHex": { "type": "string", "description": "Avatar accent hex." },
+        "online": { "type": "boolean", "description": "Online flag." },
+        "favorite": { "type": "boolean", "description": "Quick-dial favorite flag." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
-      "required": ["userId", "peerId", "displayName", "waveId", "statusText", "avatarColorHex", "online", "favorite", "createdAt", "updatedAt"]
+      "required": ["userId", "peerId", "displayName", "mehfilId", "statusText", "avatarColorHex", "online", "favorite", "createdAt", "updatedAt"]
     },
     "Chat": {
       "title": "Chat",
-      "description": "1-on-1 or group conversation metadata.",
+      "description": "1-on-1 or group chat metadata.",
       "type": "object",
       "properties": {
-        "participantUids": { "type": "array", "description": "Bounded list of participant UIDs." },
+        "participantUids": { "type": "array", "description": "Participant UIDs." },
         "participantNames": { "type": "object", "description": "Map of UID to display name." },
-        "chatKind": { "type": "string", "enum": ["DIRECT", "GROUP"], "description": "Conversation type." },
+        "chatKind": { "type": "string", "enum": ["DIRECT", "GROUP"], "description": "Conversation kind." },
         "title": { "type": "string", "description": "Conversation title." },
         "lastMessageText": { "type": "string", "description": "Latest message preview." },
-        "lastMessageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "CALL"], "description": "Type of latest message." },
-        "lastMessageSenderId": { "type": "string", "description": "UID of latest sender." },
-        "unreadCount": { "type": "integer", "description": "Unread message count." },
-        "pinned": { "type": "boolean", "description": "Whether conversation is pinned." },
-        "muted": { "type": "boolean", "description": "Whether notifications are muted." },
+        "lastMessageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "CALL"], "description": "Latest message type." },
+        "lastMessageSenderId": { "type": "string", "description": "Latest sender UID." },
+        "unreadCount": { "type": "integer", "description": "Unread count." },
+        "pinned": { "type": "boolean", "description": "Pinned flag." },
+        "muted": { "type": "boolean", "description": "Muted flag." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
@@ -74,17 +75,18 @@
     },
     "ChatMessage": {
       "title": "ChatMessage",
-      "description": "Message inside a chat conversation.",
+      "description": "Message inside a chat conversation, supporting text, images, and playable voice notes.",
       "type": "object",
       "properties": {
         "chatId": { "type": "string", "description": "Parent chat ID." },
         "senderId": { "type": "string", "description": "Sender UID." },
         "senderName": { "type": "string", "description": "Sender display name." },
-        "participantUids": { "type": "array", "description": "Denormalized participant UIDs from parent chat." },
-        "messageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "CALL"], "description": "Message payload type." },
-        "text": { "type": "string", "description": "Message text or caption." },
-        "mediaDurationSec": { "type": "integer", "description": "Duration in seconds for voice notes or calls." },
-        "imageDataBase64": { "type": "string", "description": "Optional compact JPEG thumbnail encoded as base64." },
+        "participantUids": { "type": "array", "description": "Denormalized participant UIDs." },
+        "messageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "CALL"], "description": "Payload type." },
+        "text": { "type": "string", "description": "Message body or caption." },
+        "mediaDurationSec": { "type": "integer", "description": "Duration for voice notes or calls." },
+        "imageDataBase64": { "type": "string", "description": "Optional compact JPEG base64 thumbnail." },
+        "audioDataBase64": { "type": "string", "description": "Optional compact M4A/AAC voice note base64 audio." },
         "reaction": { "type": "string", "description": "Optional emoji reaction." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
@@ -93,45 +95,149 @@
     },
     "CallRecord": {
       "title": "CallRecord",
-      "description": "Real-time call signaling session and call history log.",
+      "description": "Real-time WebRTC call signaling session and call history log.",
       "type": "object",
       "properties": {
-        "callerId": { "type": "string", "description": "Initiating caller UID." },
+        "callerId": { "type": "string", "description": "Caller UID." },
         "callerName": { "type": "string", "description": "Caller display name." },
-        "calleeId": { "type": "string", "description": "Recipient UID or echo channel." },
-        "calleeName": { "type": "string", "description": "Recipient display name." },
-        "participantUids": { "type": "array", "description": "Participant UIDs in call." },
+        "calleeId": { "type": "string", "description": "Callee UID or mehfil_studio." },
+        "calleeName": { "type": "string", "description": "Callee display name." },
+        "participantUids": { "type": "array", "description": "Participant UIDs." },
         "callType": { "type": "string", "enum": ["VIDEO", "VOICE"], "description": "Video or voice call." },
         "status": { "type": "string", "enum": ["RINGING", "ACTIVE", "ENDED", "MISSED", "DECLINED"], "description": "Call lifecycle state." },
         "qualityMode": { "type": "string", "enum": ["HD", "LOW_DATA"], "description": "Bandwidth profile." },
         "durationSeconds": { "type": "integer", "description": "Call duration in seconds." },
+        "offerSdp": { "type": "string", "description": "Optional WebRTC SDP offer." },
+        "answerSdp": { "type": "string", "description": "Optional WebRTC SDP answer." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
       "required": ["callerId", "callerName", "calleeId", "calleeName", "participantUids", "callType", "status", "qualityMode", "durationSeconds", "createdAt", "updatedAt"]
     },
+    "CallCandidate": {
+      "title": "CallCandidate",
+      "description": "WebRTC ICE candidate for real-time call peer connection.",
+      "type": "object",
+      "properties": {
+        "callId": { "type": "string", "description": "Parent call ID." },
+        "senderId": { "type": "string", "description": "Sender UID." },
+        "participantUids": { "type": "array", "description": "Denormalized participant UIDs." },
+        "sdpMid": { "type": "string", "description": "Media stream identification tag." },
+        "sdpMLineIndex": { "type": "integer", "description": "Media line index." },
+        "sdpCandidate": { "type": "string", "description": "ICE candidate SDP string." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." }
+      },
+      "required": ["callId", "senderId", "participantUids", "sdpMid", "sdpMLineIndex", "sdpCandidate", "createdAt"]
+    },
     "Story": {
       "title": "Story",
-      "description": "24-hour style WaveCall status story.",
+      "description": "Shared Mehfil status story.",
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "description": "Author UID." },
         "ownerName": { "type": "string", "description": "Author display name." },
-        "caption": { "type": "string", "description": "Story status text." },
-        "moodEmoji": { "type": "string", "description": "Featured emoji badge." },
-        "accentHex": { "type": "string", "description": "Card gradient accent hex." },
-        "viewerUids": { "type": "array", "description": "Authorized viewer UIDs including owner." },
-        "viewCount": { "type": "integer", "description": "Number of story views." },
+        "caption": { "type": "string", "description": "Story text." },
+        "moodEmoji": { "type": "string", "description": "Mood emoji." },
+        "accentHex": { "type": "string", "description": "Card accent color hex." },
+        "discoverable": { "type": "boolean", "description": "Visible to signed-in Mehfil community." },
+        "viewCount": { "type": "integer", "description": "Total views." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
-      "required": ["ownerId", "ownerName", "caption", "moodEmoji", "accentHex", "viewerUids", "viewCount", "createdAt", "updatedAt"]
+      "required": ["ownerId", "ownerName", "caption", "moodEmoji", "accentHex", "discoverable", "viewCount", "createdAt", "updatedAt"]
+    },
+    "PartyRoom": {
+      "title": "PartyRoom",
+      "description": "Real-time multi-user Mehfil Party, Music, Voice Chat, or Live room.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Room title." },
+        "roomType": { "type": "string", "enum": ["MUSIC", "PARTY", "CHAT", "LIVE"], "description": "Room mode." },
+        "hostId": { "type": "string", "description": "Host UID." },
+        "hostName": { "type": "string", "description": "Host display name." },
+        "topic": { "type": "string", "description": "Room welcome topic." },
+        "publicRoom": { "type": "boolean", "description": "Whether room appears in public lobby." },
+        "activeMemberUids": { "type": "array", "description": "Currently active participant UIDs." },
+        "viewerCount": { "type": "integer", "description": "Live listener count." },
+        "currentSongTitle": { "type": "string", "description": "Active DJ track title." },
+        "musicPlaying": { "type": "boolean", "description": "Whether DJ music playback is active." },
+        "hostMicOn": { "type": "boolean", "description": "Whether host mic is live." },
+        "totalGiftCoins": { "type": "integer", "description": "Total diamond gift value sent in room." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["name", "roomType", "hostId", "hostName", "topic", "publicRoom", "activeMemberUids", "viewerCount", "currentSongTitle", "musicPlaying", "hostMicOn", "totalGiftCoins", "createdAt", "updatedAt"]
+    },
+    "RoomSeat": {
+      "title": "RoomSeat",
+      "description": "One of 8 circular stage mic seats in a Party Room.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "description": "Parent room ID." },
+        "seatIndex": { "type": "integer", "description": "Seat index 0..7." },
+        "publicRoom": { "type": "boolean", "description": "Matches parent room visibility." },
+        "occupantId": { "type": "string", "description": "Optional current speaker UID." },
+        "occupantName": { "type": "string", "description": "Optional current speaker display name." },
+        "avatarColorHex": { "type": "string", "description": "Avatar badge hex." },
+        "muted": { "type": "boolean", "description": "Whether seat mic is muted." },
+        "giftCoins": { "type": "integer", "description": "Gifts received on this seat." },
+        "lastReaction": { "type": "string", "description": "Optional recent emoji reaction." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["roomId", "seatIndex", "publicRoom", "avatarColorHex", "muted", "giftCoins", "updatedAt"]
+    },
+    "RoomMessage": {
+      "title": "RoomMessage",
+      "description": "Live chat, gift, reaction, or song-request event in a Party Room.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "description": "Parent room ID." },
+        "senderId": { "type": "string", "description": "Sender UID." },
+        "senderName": { "type": "string", "description": "Sender display name." },
+        "kind": { "type": "string", "enum": ["TEXT", "GIFT", "SONG_REQUEST", "REACTION", "SYSTEM"], "description": "Message kind." },
+        "text": { "type": "string", "description": "Event text." },
+        "publicRoom": { "type": "boolean", "description": "Matches parent room visibility." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." }
+      },
+      "required": ["roomId", "senderId", "senderName", "kind", "text", "publicRoom", "createdAt"]
+    },
+    "RoomSongRequest": {
+      "title": "RoomSongRequest",
+      "description": "Song request queued for DJ playback inside a Party Room.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "description": "Parent room ID." },
+        "title": { "type": "string", "description": "Song title." },
+        "artist": { "type": "string", "description": "Artist or vibe." },
+        "requestedBy": { "type": "string", "description": "Requester display name." },
+        "requestedByUid": { "type": "string", "description": "Requester UID." },
+        "playing": { "type": "boolean", "description": "Currently playing flag." },
+        "publicRoom": { "type": "boolean", "description": "Matches parent room visibility." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["roomId", "title", "artist", "requestedBy", "requestedByUid", "playing", "publicRoom", "createdAt", "updatedAt"]
+    },
+    "RoomSignal": {
+      "title": "RoomSignal",
+      "description": "WebRTC audio signaling message between active mic speakers/listeners in a Party Room.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "description": "Parent room ID." },
+        "fromUid": { "type": "string", "description": "Sender UID." },
+        "toUid": { "type": "string", "description": "Recipient UID." },
+        "participantUids": { "type": "array", "description": "Pair [fromUid, toUid]." },
+        "signalType": { "type": "string", "enum": ["OFFER", "ANSWER", "ICE"], "description": "WebRTC signal kind." },
+        "payload": { "type": "string", "description": "SDP or ICE JSON payload." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." }
+      },
+      "required": ["roomId", "fromUid", "toUid", "participantUids", "signalType", "payload", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserAccount" },
-      "description": "Owner-only private user account document."
+      "description": "Owner-only private Mehfil user account document."
     },
     "/profiles/{profileId}": {
       "schema": { "$ref": "#/entities/PublicProfile" },
@@ -139,7 +245,7 @@
     },
     "/users/{userId}/contacts/{contactId}": {
       "schema": { "$ref": "#/entities/Contact" },
-      "description": "User's personal WaveCall contacts."
+      "description": "User personal contacts."
     },
     "/chats/{chatId}": {
       "schema": { "$ref": "#/entities/Chat" },
@@ -147,15 +253,39 @@
     },
     "/chats/{chatId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessage" },
-      "description": "Denormalized participant-scoped chat messages."
+      "description": "Participant-scoped chat messages with text, images, and voice notes."
     },
     "/calls/{callId}": {
       "schema": { "$ref": "#/entities/CallRecord" },
-      "description": "Real-time call signaling and call history logs."
+      "description": "Real-time WebRTC call signaling and call history logs."
+    },
+    "/calls/{callId}/candidates/{candidateId}": {
+      "schema": { "$ref": "#/entities/CallCandidate" },
+      "description": "WebRTC ICE candidates for a call."
     },
     "/stories/{storyId}": {
       "schema": { "$ref": "#/entities/Story" },
-      "description": "Viewer-scoped status stories."
+      "description": "Shared Mehfil status stories."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/PartyRoom" },
+      "description": "Real-time multi-user Party, Music, Chat, and Live rooms."
+    },
+    "/rooms/{roomId}/seats/{seatId}": {
+      "schema": { "$ref": "#/entities/RoomSeat" },
+      "description": "8 circular mic seats inside a Party Room."
+    },
+    "/rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/RoomMessage" },
+      "description": "Live chat, gifts, reactions, and song requests in a Party Room."
+    },
+    "/rooms/{roomId}/songs/{songId}": {
+      "schema": { "$ref": "#/entities/RoomSongRequest" },
+      "description": "DJ queue tracks in a Party Room."
+    },
+    "/rooms/{roomId}/signals/{signalId}": {
+      "schema": { "$ref": "#/entities/RoomSignal" },
+      "description": "Pair-scoped WebRTC audio signaling messages inside a Party Room."
     }
   }
 }

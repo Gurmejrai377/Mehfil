@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,12 +44,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.CallRecord
 import com.example.data.CallStatus
 import com.example.data.CallType
@@ -65,8 +70,8 @@ import com.example.ui.theme.MehfilMint
 import com.example.ui.theme.MehfilPurple
 import com.example.ui.theme.MehfilRoyalPurple
 import com.example.viewmodel.MehfilViewModel
+import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 private enum class CallFilter(val label: String) {
@@ -102,12 +107,29 @@ fun CallsTabScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(MehfilMidnightPlum, MehfilDeepPurple, MehfilMidnightPlum)
-                )
-            )
+            .background(MehfilMidnightPlum)
     ) {
+        Image(
+            painter = painterResource(id = R.drawable.img_party_stage),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(0.24f)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MehfilMidnightPlum.copy(alpha = 0.72f),
+                            MehfilDeepPurple.copy(alpha = 0.78f),
+                            MehfilMidnightPlum.copy(alpha = 0.92f)
+                        )
+                    )
+                )
+        )
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
                 title = {
@@ -158,7 +180,7 @@ fun CallsTabScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Test live CameraX video, front/rear lens switch, and real-time mic waveform.",
+                                    text = "Test live HD WebRTC camera, front/rear lens switch, and real-time mic waveform.",
                                     color = MehfilChampagne.copy(alpha = 0.88f),
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -313,9 +335,9 @@ fun CallsTabScreen(
     }
 }
 
-private fun formatCallTimestamp(epochMillis: Long): String {
-    return if (epochMillis <= 0L) "Just now"
-    else SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(epochMillis))
+private fun formatCallTimestamp(ts: Timestamp?): String {
+    return if (ts == null) "Just now"
+    else SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(ts.toDate())
 }
 
 @Composable

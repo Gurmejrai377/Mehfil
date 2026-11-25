@@ -1,5 +1,6 @@
 package com.example.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.CallQualityMode
@@ -11,10 +12,13 @@ import com.example.data.Contact
 import com.example.data.MehfilRepository
 import com.example.data.MessageType
 import com.example.data.PartyRoom
+import com.example.data.PublicProfile
 import com.example.data.RoomType
 import com.example.data.Story
 import com.example.data.UiState
 import com.example.data.UserAccount
+import com.example.data.unwrapFirestoreError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,45 +29,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class SessionViewModel(
-    private val repository: MehfilRepository
-) : ViewModel() {
-
-    val activeUser: StateFlow<UiState<UserAccount?>> = repository.observeActiveUser()
-        .map<UserAccount?, UiState<UserAccount?>> { UiState.Success(it) }
-        .catch { emit(UiState.Error(it.localizedMessage ?: "Failed to load session")) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = UiState.Loading
-        )
-
-    private val _events = MutableSharedFlow<String>()
-    val events = _events.asSharedFlow()
-
-    fun loginAsGuest(displayName: String) {
-        viewModelScope.launch {
-            repository.loginAsGuest(displayName).onFailure {
-                _events.emit(it.localizedMessage ?: "Could not start guest session")
-            }
-        }
-    }
-
-    fun loginWithPhoneOtp(phoneNumber: String, displayName: String) {
-        viewModelScope.launch {
-            repository.loginWithPhoneOtp(phoneNumber, displayName).onFailure {
-                _events.emit(it.localizedMessage ?: "Could not sign in with phone")
-            }
-        }
-    }
-
-    fun signOut() {
-        viewModelScope.launch {
-            repository.signOut()
-        }
-    }
-}
-
 class MehfilViewModel(
     private val repository: MehfilRepository,
     val currentUserId: String
@@ -71,14 +36,19 @@ class MehfilViewModel(
 
     init {
         viewModelScope.launch {
-            repository.seedStarterRoomsIfEmpty()
+            repository.ensureUserProfileAndCircle().onFailure { error ->
+                _events.emit(error.localizedMessage ?: "Unable to sync your Mehfil cloud profile.")
+            }
         }
     }
 
     private fun <T> Flow<T>.toUiStateFlow(label: String): StateFlow<UiState<T>> =
         this.map<T, UiState<T>> { UiState.Success(it) }
             .catch { error ->
-                emit(UiState.Error(error.localizedMessage ?: "Failed to load $label"))
+                val unwrapped = unwrapFirestoreError(error)
+                if (unwrapped is CancellationException) throw unwrapped
+                Log.w("MehfilVM", "Error observing $label", unwrapped)
+                emit(UiState.Error(unwrapped.message ?: "Failed to load $label"))
             }
             .stateIn(
                 scope = viewModelScope,
@@ -89,6 +59,11 @@ class MehfilViewModel(
     val userAccount: StateFlow<UiState<UserAccount?>> =
         repository.observeUserAccount(currentUserId).toUiStateFlow("account")
 
+    val discoverableProfilesState: StateFlow<UiState<List<PublicProfile>>> =
+        repository.observeDiscoverableProfiles()
+            .map { list -> list.filter { it.userId != currentUserId } }
+            .toUiStateFlow("profiles")
+
     val chatsState: StateFlow<UiState<List<Chat>>> =
         repository.observeChats(currentUserId).toUiStateFlow("chats")
 
@@ -98,13 +73,27 @@ class MehfilViewModel(
     val callsState: StateFlow<UiState<List<CallRecord>>> =
         repository.observeCalls(currentUserId).toUiStateFlow("calls")
 
+    val incomingCall: StateFlow<CallRecord?> = callsState
+        .map { state ->
+            val list = (state as? UiState.Success)?.data.orEmpty()
+            list.firstOrNull {
+                it.calleeId == currentUserId &&
+                    CallStatus.fromRaw(it.status) == CallStatus.RINGING
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000L),
+            initialValue = null
+        )
+
     val storiesState: StateFlow<UiState<List<Story>>> =
         repository.observeStories().toUiStateFlow("stories")
 
     val partyRoomsState: StateFlow<UiState<List<PartyRoom>>> =
         repository.observePartyRooms().toUiStateFlow("rooms")
 
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events = _events.asSharedFlow()
 
     fun createPartyRoom(
@@ -137,7 +126,7 @@ class MehfilViewModel(
     ) {
         viewModelScope.launch {
             repository.updateUserSettings(currentUserId, displayName, bio, online, lowDataMode)
-                .onSuccess { _events.emit("Profile updated") }
+                .onSuccess { _events.emit("Profile updated on Mehfil Cloud") }
                 .onFailure { _events.emit(it.localizedMessage ?: "Could not update profile") }
         }
     }
@@ -167,13 +156,13 @@ class MehfilViewModel(
 
     fun toggleFavorite(contact: Contact) {
         viewModelScope.launch {
-            repository.toggleContactFavorite(contact.id, !contact.favorite)
+            repository.toggleContactFavorite(currentUserId, contact.id, !contact.favorite)
         }
     }
 
     fun deleteContact(contactId: String) {
         viewModelScope.launch {
-            repository.deleteContact(contactId)
+            repository.deleteContact(currentUserId, contactId)
                 .onSuccess { _events.emit("Contact removed") }
         }
     }
@@ -183,8 +172,9 @@ class MehfilViewModel(
         peerName: String,
         onChatReady: (chatId: String) -> Unit
     ) {
+        val myName = (userAccount.value as? UiState.Success)?.data?.displayName ?: "Mehfil User"
         viewModelScope.launch {
-            repository.getOrCreateDirectChat(currentUserId, peerId, peerName)
+            repository.getOrCreateDirectChat(currentUserId, myName, peerId, peerName)
                 .onSuccess { chatId -> onChatReady(chatId) }
                 .onFailure { _events.emit(it.localizedMessage ?: "Could not open chat") }
         }
@@ -215,6 +205,35 @@ class MehfilViewModel(
         }
     }
 
+    fun acceptIncomingCall(
+        call: CallRecord,
+        onAccepted: (callId: String, peerId: String, peerName: String, callType: CallType, quality: CallQualityMode) -> Unit
+    ) {
+        val account = (userAccount.value as? UiState.Success)?.data
+        val quality = if (account?.lowDataMode == true) CallQualityMode.LOW_DATA else CallQualityMode.HD
+        viewModelScope.launch {
+            repository.updateCall(call.id, CallStatus.ACTIVE, 0L, quality)
+            onAccepted(
+                call.id,
+                call.callerId,
+                call.callerName,
+                CallType.fromRaw(call.callType),
+                quality
+            )
+        }
+    }
+
+    fun declineIncomingCall(call: CallRecord) {
+        viewModelScope.launch {
+            repository.updateCall(
+                call.id,
+                CallStatus.DECLINED,
+                0L,
+                CallQualityMode.fromRaw(call.qualityMode)
+            )
+        }
+    }
+
     fun finishCall(
         callId: String,
         peerId: String,
@@ -226,7 +245,7 @@ class MehfilViewModel(
         val myName = (userAccount.value as? UiState.Success)?.data?.displayName ?: "Mehfil User"
         viewModelScope.launch {
             repository.updateCall(callId, CallStatus.ENDED, durationSeconds, qualityMode)
-            repository.getOrCreateDirectChat(currentUserId, peerId, peerName)
+            repository.getOrCreateDirectChat(currentUserId, myName, peerId, peerName)
                 .onSuccess { chatId ->
                     val label = if (callType == CallType.VIDEO) "HD Video call" else "Voice call"
                     val formatted = formatDurationShort(durationSeconds)
@@ -244,7 +263,7 @@ class MehfilViewModel(
 
     fun updateActiveCallQuality(callId: String, qualityMode: CallQualityMode) {
         viewModelScope.launch {
-            repository.updateCall(callId, CallStatus.ACTIVE, 0L, qualityMode)
+            repository.updateCallQuality(callId, qualityMode)
         }
     }
 

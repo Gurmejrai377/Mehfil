@@ -1,22 +1,15 @@
 package com.example.data
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
+import androidx.annotation.Keep
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.IgnoreExtraProperties
+import com.google.firebase.firestore.ServerTimestamp
 
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
     data class Error(val message: String) : UiState<Nothing>
-}
-
-enum class LoginMode {
-    GUEST,
-    PHONE;
-
-    companion object {
-        fun fromRaw(raw: String?): LoginMode =
-            entries.firstOrNull { it.name == raw } ?: GUEST
-    }
 }
 
 enum class ChatKind {
@@ -124,146 +117,219 @@ enum class RoomMessageKind {
     }
 }
 
-@Entity(tableName = "user_accounts")
+@Keep
+@IgnoreExtraProperties
 data class UserAccount(
-    @PrimaryKey val userId: String,
-    val displayName: String,
-    val phoneNumber: String? = null,
-    val loginMode: String = LoginMode.GUEST.name,
-    val mehfilId: String,
-    val bio: String,
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val displayName: String = "",
+    val email: String? = null,
+    val mehfilId: String = "",
+    val bio: String = "Yahan har baat ek Mehfil hai",
     val online: Boolean = true,
     val lowDataMode: Boolean = false,
-    val isActiveSession: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val coinBalance: Long = 5000L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "contacts")
+@Keep
+@IgnoreExtraProperties
+data class PublicProfile(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val displayName: String = "",
+    val mehfilId: String = "",
+    val statusText: String = "On Mehfil",
+    val avatarColorHex: String = "#6E2CF2",
+    val online: Boolean = true,
+    val discoverable: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
 data class Contact(
-    @PrimaryKey val id: String,
-    val userId: String,
-    val peerId: String,
-    val displayName: String,
-    val mehfilId: String,
-    val statusText: String,
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val peerId: String = "",
+    val displayName: String = "",
+    val mehfilId: String = "",
+    val statusText: String = "",
     val avatarColorHex: String = "#6E2CF2",
     val online: Boolean = true,
     val favorite: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "chats")
+@Keep
+@IgnoreExtraProperties
 data class Chat(
-    @PrimaryKey val id: String,
-    val ownerUserId: String,
-    val peerId: String,
-    val peerName: String,
+    @DocumentId val id: String = "",
+    val participantUids: List<String> = emptyList(),
+    val participantNames: Map<String, String> = emptyMap(),
     val chatKind: String = ChatKind.DIRECT.name,
+    val title: String = "",
     val lastMessageText: String = "",
     val lastMessageType: String = MessageType.TEXT.name,
     val lastMessageSenderId: String = "",
     val unreadCount: Long = 0L,
     val pinned: Boolean = false,
     val muted: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
-)
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun resolvedPeerId(currentUserId: String): String =
+        participantUids.firstOrNull { it != currentUserId }
+            ?: participantUids.firstOrNull().orEmpty()
 
-@Entity(tableName = "chat_messages")
+    fun resolvedPeerName(currentUserId: String): String {
+        val pid = resolvedPeerId(currentUserId)
+        return participantNames[pid]?.takeIf { it.isNotBlank() }
+            ?: title.ifBlank { "Mehfil Friend" }
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
 data class ChatMessage(
-    @PrimaryKey val id: String,
-    val chatId: String,
-    val senderId: String,
-    val senderName: String,
+    @DocumentId val id: String = "",
+    val chatId: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
+    val participantUids: List<String> = emptyList(),
     val messageType: String = MessageType.TEXT.name,
     val text: String = "",
     val mediaDurationSec: Long = 0L,
     val imageDataBase64: String? = null,
+    val audioDataBase64: String? = null,
     val reaction: String? = null,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "call_records")
+@Keep
+@IgnoreExtraProperties
 data class CallRecord(
-    @PrimaryKey val id: String,
-    val ownerUserId: String,
-    val callerId: String,
-    val callerName: String,
-    val calleeId: String,
-    val calleeName: String,
+    @DocumentId val id: String = "",
+    val callerId: String = "",
+    val callerName: String = "",
+    val calleeId: String = "",
+    val calleeName: String = "",
+    val participantUids: List<String> = emptyList(),
     val callType: String = CallType.VIDEO.name,
-    val status: String = CallStatus.ENDED.name,
+    val status: String = CallStatus.RINGING.name,
     val qualityMode: String = CallQualityMode.HD.name,
     val durationSeconds: Long = 0L,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val offerSdp: String? = null,
+    val answerSdp: String? = null,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "stories")
+@Keep
+@IgnoreExtraProperties
+data class CallCandidate(
+    @DocumentId val id: String = "",
+    val callId: String = "",
+    val senderId: String = "",
+    val participantUids: List<String> = emptyList(),
+    val sdpMid: String = "",
+    val sdpMLineIndex: Int = 0,
+    val sdpCandidate: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
 data class Story(
-    @PrimaryKey val id: String,
-    val ownerId: String,
-    val ownerName: String,
-    val caption: String,
+    @DocumentId val id: String = "",
+    val ownerId: String = "",
+    val ownerName: String = "",
+    val caption: String = "",
     val moodEmoji: String = "✨",
     val accentHex: String = "#6E2CF2",
+    val discoverable: Boolean = true,
     val viewCount: Long = 0L,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "party_rooms")
+@Keep
+@IgnoreExtraProperties
 data class PartyRoom(
-    @PrimaryKey val id: String,
-    val name: String,
+    @DocumentId val id: String = "",
+    val name: String = "",
     val roomType: String = RoomType.PARTY.name,
-    val hostId: String,
-    val hostName: String,
-    val topic: String,
+    val hostId: String = "",
+    val hostName: String = "",
+    val topic: String = "",
+    val publicRoom: Boolean = true,
+    val activeMemberUids: List<String> = emptyList(),
     val viewerCount: Long = 1L,
     val currentSongTitle: String = "",
-    val isMusicPlaying: Boolean = false,
+    val musicPlaying: Boolean = false,
     val hostMicOn: Boolean = true,
     val totalGiftCoins: Long = 0L,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "room_seats")
+@Keep
+@IgnoreExtraProperties
 data class RoomSeat(
-    @PrimaryKey val id: String,
-    val roomId: String,
-    val seatIndex: Int,
+    @DocumentId val id: String = "",
+    val roomId: String = "",
+    val seatIndex: Int = 0,
+    val publicRoom: Boolean = true,
     val occupantId: String? = null,
     val occupantName: String? = null,
     val avatarColorHex: String = "#6E2CF2",
-    val isMuted: Boolean = false,
+    val muted: Boolean = false,
     val giftCoins: Long = 0L,
     val lastReaction: String? = null,
-    val updatedAt: Long = System.currentTimeMillis()
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
-@Entity(tableName = "room_messages")
+@Keep
+@IgnoreExtraProperties
 data class RoomMessage(
-    @PrimaryKey val id: String,
-    val roomId: String,
-    val senderId: String,
-    val senderName: String,
+    @DocumentId val id: String = "",
+    val roomId: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
     val kind: String = RoomMessageKind.TEXT.name,
-    val text: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val text: String = "",
+    val publicRoom: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null
 )
 
-@Entity(tableName = "room_songs")
+@Keep
+@IgnoreExtraProperties
 data class RoomSongRequest(
-    @PrimaryKey val id: String,
-    val roomId: String,
-    val title: String,
-    val artist: String,
-    val requestedBy: String,
-    val isPlaying: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    @DocumentId val id: String = "",
+    val roomId: String = "",
+    val title: String = "",
+    val artist: String = "",
+    val requestedBy: String = "",
+    val requestedByUid: String = "",
+    val playing: Boolean = false,
+    val publicRoom: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class RoomSignal(
+    @DocumentId val id: String = "",
+    val roomId: String = "",
+    val fromUid: String = "",
+    val toUid: String = "",
+    val participantUids: List<String> = emptyList(),
+    val signalType: String = "OFFER",
+    val payload: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
 )

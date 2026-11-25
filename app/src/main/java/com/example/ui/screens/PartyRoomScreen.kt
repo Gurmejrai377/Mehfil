@@ -73,10 +73,12 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,7 +108,8 @@ import com.example.data.RoomSeat
 import com.example.data.RoomSongRequest
 import com.example.data.RoomType
 import com.example.data.UiState
-import com.example.media.AudioLevelMonitor
+import com.example.media.MehfilDjPlayer
+import com.example.media.RoomVoiceMesh
 import com.example.ui.components.AnimatedMusicEqualizer
 import com.example.ui.components.MehfilAvatar
 import com.example.ui.components.MehfilGlassCard
@@ -181,13 +184,70 @@ fun PartyRoomScreen(
     val isUserHost = room?.hostId == viewModel.currentUserId
     val isMyMicLive = when {
         isUserHost -> room?.hostMicOn == true
-        mySeat != null -> !mySeat.isMuted
+        mySeat != null -> !mySeat.muted
         else -> false
     }
 
-    val micLevel by AudioLevelMonitor
-        .observeMicLevel(hasPermission = hasMicPermission && isMyMicLive, isMuted = !isMyMicLive)
-        .collectAsStateWithLifecycle(initialValue = 0f)
+    val scope = rememberCoroutineScope()
+    val djPlayer = remember(viewModel.roomId) { MehfilDjPlayer(scope) }
+    val voiceMesh = remember(viewModel.roomId, viewModel.currentUserId) {
+        RoomVoiceMesh(
+            context = context.applicationContext,
+            repository = viewModel.repository,
+            scope = scope,
+            roomId = viewModel.roomId,
+            currentUserId = viewModel.currentUserId
+        )
+    }
+
+    DisposableEffect(viewModel.roomId) {
+        voiceMesh.startListening()
+        onDispose {
+            djPlayer.release()
+            voiceMesh.release()
+        }
+    }
+
+    LaunchedEffect(room?.currentSongTitle, room?.musicPlaying) {
+        djPlayer.updateState(
+            trackTitle = room?.currentSongTitle.orEmpty(),
+            shouldPlay = room?.musicPlaying == true
+        )
+    }
+
+    val speakerUids = remember(seats, room?.hostId, room?.hostMicOn) {
+        buildSet {
+            val hostId = room?.hostId
+            if (!hostId.isNullOrBlank() && room?.hostMicOn == true) {
+                add(hostId)
+            }
+            seats.forEach { seat ->
+                val uid = seat.occupantId
+                if (!uid.isNullOrBlank() && !seat.muted) {
+                    add(uid)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(speakerUids, isMyMicLive, hasMicPermission) {
+        voiceMesh.syncStageState(
+            speakerUids = speakerUids,
+            myMicLive = isMyMicLive && hasMicPermission
+        )
+    }
+
+    val micPulseTransition = rememberInfiniteTransition(label = "mic_pulse")
+    val animatedMicPulse by micPulseTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(650, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_val"
+    )
+    val micLevel = if (isMyMicLive && hasMicPermission) animatedMicPulse else 0f
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
@@ -211,7 +271,15 @@ fun PartyRoomScreen(
         }
     }
 
-    BackHandler(onBack = onBack)
+    var isLeavingRoom by remember { mutableStateOf(false) }
+    val handleLeaveRoom: () -> Unit = {
+        if (!isLeavingRoom) {
+            isLeavingRoom = true
+            viewModel.leaveRoom(onDone = onBack)
+        }
+    }
+
+    BackHandler(onBack = handleLeaveRoom)
 
     Box(
         modifier = Modifier
@@ -255,7 +323,7 @@ fun PartyRoomScreen(
                         }
                     },
                     isMyMicLive = isMyMicLive,
-                    isMusicPlaying = room?.isMusicPlaying == true,
+                    isMusicPlaying = room?.musicPlaying == true,
                     onToggleMic = {
                         if (!hasMicPermission) {
                             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -315,7 +383,7 @@ fun PartyRoomScreen(
                             PartyRoomTopHeader(
                                 room = room,
                                 roomType = roomType,
-                                onBack = onBack,
+                                onBack = handleLeaveRoom,
                                 onOpenMusic = { showMusicSheet = true }
                             )
 
@@ -488,7 +556,7 @@ private fun PartyRoomTopHeader(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "${roomType.emoji} ${roomType.displayTitle}",
+                        text = "${roomType.emoji} ${roomType.displayTitle} • ${room.viewerCount} Members",
                         style = MaterialTheme.typography.labelSmall,
                         color = MehfilGold
                     )
@@ -525,7 +593,7 @@ private fun PartyRoomTopHeader(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        AnimatedMusicEqualizer(isPlaying = room.isMusicPlaying)
+                        AnimatedMusicEqualizer(isPlaying = room.musicPlaying)
                         Spacer(modifier = Modifier.width(5.dp))
                         Text("DJ", style = MaterialTheme.typography.labelSmall, color = Color.White)
                     }
@@ -647,7 +715,7 @@ private fun HostStagePedestal(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (room.isMusicPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        imageVector = if (room.musicPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = "Toggle DJ song",
                         tint = MehfilGold,
                         modifier = Modifier.size(15.dp)
@@ -719,7 +787,7 @@ private fun CircularMicStage(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(
-                        if (roomType == RoomType.MUSIC && room.isMusicPlaying) {
+                        if (roomType == RoomType.MUSIC && room.musicPlaying) {
                             Modifier.rotate(spinAngle)
                         } else {
                             Modifier
@@ -765,7 +833,7 @@ private fun MicSeatCircleItem(
             .testTag("room_seat_${seat.seatIndex}")
     ) {
         Box(contentAlignment = Alignment.Center) {
-            if (isOccupied && !seat.isMuted) {
+            if (isOccupied && !seat.muted) {
                 Box(
                     modifier = Modifier
                         .size(50.dp)
@@ -786,7 +854,7 @@ private fun MicSeatCircleItem(
                     online = false,
                     hasStoryRing = isMine
                 )
-                if (seat.isMuted) {
+                if (seat.muted) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -1002,7 +1070,7 @@ private fun PartyRoomBottomDock(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(MehfilChampagne, MehfilGold, MehfilRichGold)))
+                    .background(Brush.linearGradient(listOf(MehfilGold, MehfilPurple, MehfilRichGold)))
                     .testTag("room_gift_button")
             ) {
                 Icon(
@@ -1198,12 +1266,12 @@ private fun MusicDjBottomSheet(
                     )
                 ) {
                     Icon(
-                        imageVector = if (room.isMusicPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        imageVector = if (room.musicPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (room.isMusicPlaying) "Pause" else "Play", fontWeight = FontWeight.Bold)
+                    Text(if (room.musicPlaying) "Pause" else "Play", fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -1274,7 +1342,7 @@ private fun MusicDjBottomSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
-                        highlightGold = song.isPlaying,
+                        highlightGold = song.playing,
                         onClick = { onPlaySong(song) }
                     ) {
                         Row(
@@ -1288,13 +1356,13 @@ private fun MusicDjBottomSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                AnimatedMusicEqualizer(isPlaying = song.isPlaying && room.isMusicPlaying)
+                                AnimatedMusicEqualizer(isPlaying = song.playing && room.musicPlaying)
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
                                         text = song.title,
                                         style = MaterialTheme.typography.titleSmall,
-                                        color = if (song.isPlaying) MehfilGold else Color.White,
+                                        color = if (song.playing) MehfilGold else Color.White,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -1306,7 +1374,7 @@ private fun MusicDjBottomSheet(
                                 }
                             }
                             Text(
-                                text = if (song.isPlaying) "PLAYING" else "PLAY",
+                                text = if (song.playing) "PLAYING" else "PLAY",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MehfilGold

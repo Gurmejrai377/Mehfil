@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,7 +25,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Videocam
@@ -31,9 +35,11 @@ import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,7 +47,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,14 +55,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.CallType
 import com.example.data.Chat
 import com.example.data.Contact
@@ -71,17 +80,22 @@ import com.example.ui.components.parseHexColor
 import com.example.ui.theme.MehfilChampagne
 import com.example.ui.theme.MehfilDeepPurple
 import com.example.ui.theme.MehfilGlassBg
+import com.example.ui.theme.MehfilGlassBgStrong
 import com.example.ui.theme.MehfilGold
 import com.example.ui.theme.MehfilMidnightPlum
 import com.example.ui.theme.MehfilMint
+import com.example.ui.theme.MehfilNeonCyan
+import com.example.ui.theme.MehfilNeonGreen
+import com.example.ui.theme.MehfilObsidian
 import com.example.ui.theme.MehfilPurple
+import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatsTabScreen(
+    currentUserId: String,
     accountState: UiState<UserAccount?>,
     chatsState: UiState<List<Chat>>,
     storiesState: UiState<List<Story>>,
@@ -91,7 +105,9 @@ fun ChatsTabScreen(
     onOpenProfile: () -> Unit,
     onPostStory: (caption: String, moodEmoji: String, accentHex: String) -> Unit,
     onOpenStory: (Story) -> Unit,
-    onGoToContacts: () -> Unit
+    onGoToContacts: () -> Unit,
+    onGoToRooms: () -> Unit = {},
+    onGoToCalls: () -> Unit = {}
 ) {
     val account = (accountState as? UiState.Success)?.data
     val contacts = (contactsState as? UiState.Success)?.data.orEmpty()
@@ -101,11 +117,11 @@ fun ChatsTabScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showAddStoryDialog by remember { mutableStateOf(false) }
 
-    val filteredChats = remember(chatsState, searchQuery) {
+    val filteredChats = remember(chatsState, searchQuery, currentUserId) {
         val list = (chatsState as? UiState.Success)?.data.orEmpty()
         if (searchQuery.isBlank()) list
         else list.filter { chat ->
-            chat.peerName.contains(searchQuery, ignoreCase = true) ||
+            chat.resolvedPeerName(currentUserId).contains(searchQuery, ignoreCase = true) ||
                 chat.lastMessageText.contains(searchQuery, ignoreCase = true)
         }
     }
@@ -113,14 +129,44 @@ fun ChatsTabScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(MehfilMidnightPlum, MehfilDeepPurple, MehfilMidnightPlum)
-                )
-            )
+            .background(MehfilObsidian)
     ) {
+        Image(
+            painter = painterResource(id = R.drawable.img_party_stage),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(0.24f)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MehfilObsidian.copy(alpha = 0.72f),
+                            MehfilDeepPurple.copy(alpha = 0.78f),
+                            MehfilObsidian.copy(alpha = 0.92f)
+                        )
+                    )
+                )
+        )
+
         Column(modifier = Modifier.fillMaxSize()) {
-            TopAppBar(
+            CenterAlignedTopAppBar(
+                navigationIcon = {
+                    IconButton(
+                        onClick = onOpenProfile,
+                        modifier = Modifier.testTag("open_profile_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Menu,
+                            contentDescription = "Open Mehfil profile and settings",
+                            tint = Color.White
+                        )
+                    }
+                },
                 title = {
                     if (searchActive) {
                         OutlinedTextField(
@@ -134,36 +180,24 @@ fun ChatsTabScreen(
                         )
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            MehfilLogoBadge(size = 38.dp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f, fill = false)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "Mehfil",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MehfilChampagne
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        color = MehfilGold.copy(alpha = 0.22f),
-                                        shape = RoundedCornerShape(50)
-                                    ) {
-                                        Text(
-                                            text = if (account?.lowDataMode == true) "Eco" else "HD",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MehfilGold,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
+                            Text(
+                                text = "Mehfil",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                color = MehfilNeonGreen.copy(alpha = 0.18f),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, MehfilNeonGreen.copy(alpha = 0.4f))
+                            ) {
                                 Text(
-                                    text = "Yahan har baat ek Mehfil hai",
+                                    text = if (account?.lowDataMode == true) "Eco" else "HD",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MehfilGold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    fontWeight = FontWeight.Bold,
+                                    color = MehfilNeonGreen,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
                             }
                         }
@@ -180,24 +214,89 @@ fun ChatsTabScreen(
                         Icon(
                             imageVector = if (searchActive) Icons.Rounded.Close else Icons.Rounded.Search,
                             contentDescription = if (searchActive) "Close search" else "Search chats",
-                            tint = MehfilChampagne
+                            tint = Color.White
                         )
                     }
                     IconButton(
-                        onClick = onOpenProfile,
-                        modifier = Modifier.testTag("open_profile_button")
+                        onClick = onGoToContacts,
+                        modifier = Modifier.testTag("header_new_chat_button")
                     ) {
-                        MehfilAvatar(
-                            name = account?.displayName ?: "Mehfil",
-                            size = 36.dp,
-                            online = account?.online ?: true
-                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = MehfilNeonCyan.copy(alpha = 0.18f),
+                            border = BorderStroke(1.dp, MehfilNeonCyan.copy(alpha = 0.55f)),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = "New chat or call",
+                                    tint = MehfilNeonCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = Color.Transparent
                 )
             )
+
+            // Mockup-style Segmented Quick Pill Row (Chats | Rooms | Calls)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MehfilNeonGreen,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "Chats",
+                        color = MehfilObsidian,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 9.dp)
+                    )
+                }
+                Surface(
+                    onClick = onGoToRooms,
+                    shape = RoundedCornerShape(50),
+                    color = MehfilGlassBgStrong,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "Rooms",
+                        color = MehfilChampagne.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 9.dp)
+                    )
+                }
+                Surface(
+                    onClick = onGoToCalls,
+                    shape = RoundedCornerShape(50),
+                    color = MehfilGlassBgStrong,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "Calls",
+                        color = MehfilChampagne.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 9.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
 
             when (chatsState) {
                 is UiState.Loading -> {
@@ -222,7 +321,7 @@ fun ChatsTabScreen(
                 is UiState.Success -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 24.dp),
+                        contentPadding = PaddingValues(bottom = 92.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item(key = "stories_strip") {
@@ -247,25 +346,44 @@ fun ChatsTabScreen(
                             }
                         } else {
                             items(filteredChats, key = { it.id }) { chat ->
-                                val contact = contacts.firstOrNull { it.peerId == chat.peerId }
+                                val peerId = chat.resolvedPeerId(currentUserId)
+                                val peerName = chat.resolvedPeerName(currentUserId)
+                                val contact = contacts.firstOrNull { it.peerId == peerId }
                                 val isOnline = contact?.online ?: true
-                                val accentHex = contact?.avatarColorHex ?: "#6E2CF2"
+                                val accentHex = contact?.avatarColorHex ?: "#00D4FF"
                                 val timeText = formatChatTimestamp(chat.updatedAt)
 
                                 ChatRowItem(
                                     chat = chat,
+                                    peerName = peerName,
                                     accentHex = accentHex,
                                     timeText = timeText,
                                     isOnline = isOnline,
-                                    onClick = { onOpenChat(chat.id, chat.peerId, chat.peerName) },
-                                    onVoiceCall = { onStartCall(chat.peerId, chat.peerName, CallType.VOICE) },
-                                    onVideoCall = { onStartCall(chat.peerId, chat.peerName, CallType.VIDEO) }
+                                    onClick = { onOpenChat(chat.id, peerId, peerName) },
+                                    onVoiceCall = { onStartCall(peerId, peerName, CallType.VOICE) },
+                                    onVideoCall = { onStartCall(peerId, peerName, CallType.VIDEO) }
                                 )
                             }
                         }
                     }
                 }
             }
+        }
+
+        FloatingActionButton(
+            onClick = onGoToContacts,
+            containerColor = MehfilNeonGreen,
+            contentColor = MehfilObsidian,
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 18.dp, bottom = 18.dp)
+                .testTag("chats_fab_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.ChatBubble,
+                contentDescription = "Start new Mehfil chat"
+            )
         }
     }
 
@@ -280,9 +398,9 @@ fun ChatsTabScreen(
     }
 }
 
-private fun formatChatTimestamp(epochMillis: Long): String {
-    return if (epochMillis <= 0L) "Now"
-    else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(epochMillis))
+private fun formatChatTimestamp(ts: Timestamp?): String {
+    return if (ts == null) "Now"
+    else SimpleDateFormat("h:mm a", Locale.getDefault()).format(ts.toDate())
 }
 
 @Composable
@@ -401,6 +519,7 @@ private fun StoriesAndOnlineStrip(
 @Composable
 private fun ChatRowItem(
     chat: Chat,
+    peerName: String,
     accentHex: String,
     timeText: String,
     isOnline: Boolean,
@@ -423,7 +542,7 @@ private fun ChatRowItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             MehfilAvatar(
-                name = chat.peerName,
+                name = peerName,
                 accentHex = accentHex,
                 size = 54.dp,
                 online = isOnline,
@@ -436,7 +555,7 @@ private fun ChatRowItem(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = chat.peerName,
+                        text = peerName,
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         maxLines = 1,
@@ -472,12 +591,31 @@ private fun ChatRowItem(
 
             Spacer(modifier = Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = timeText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MehfilGold.copy(alpha = 0.8f)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = timeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MehfilGold.copy(alpha = 0.85f)
+                    )
+                    if (chat.unreadCount > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MehfilNeonGreen
+                        ) {
+                            Text(
+                                text = chat.unreadCount.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MehfilObsidian,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     IconButton(
                         onClick = onVoiceCall,
@@ -487,7 +625,7 @@ private fun ChatRowItem(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Call,
-                            contentDescription = "Voice call ${chat.peerName}",
+                            contentDescription = "Voice call $peerName",
                             tint = MehfilMint,
                             modifier = Modifier.size(20.dp)
                         )
@@ -500,8 +638,8 @@ private fun ChatRowItem(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Videocam,
-                            contentDescription = "Video call ${chat.peerName}",
-                            tint = MehfilGold,
+                            contentDescription = "Video call $peerName",
+                            tint = MehfilNeonCyan,
                             modifier = Modifier.size(22.dp)
                         )
                     }
