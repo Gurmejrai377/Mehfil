@@ -136,16 +136,31 @@ private val MEHFIL_TABS = listOf(
 fun MehfilApp() {
     var showSplash by remember { mutableStateOf(true) }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val firebaseReady = remember(context) { isFirebaseConfigured(context) }
 
+    when {
+        showSplash -> {
+            SplashScreen(onFinished = { showSplash = false })
+        }
+        !firebaseReady -> {
+            LoginScreen(
+                initialError = "Firebase configuration (app/google-services.json) is missing in this APK build. Add app/google-services.json to GitHub or download the APK from AI Studio.",
+                onAuthSuccess = {}
+            )
+        }
+        else -> {
+            FirebaseAuthRoot()
+        }
+    }
+}
+
+@Composable
+private fun FirebaseAuthRoot() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val currentUser by remember {
         Firebase.auth.authStateFlow()
     }.collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
-
-    if (showSplash) {
-        SplashScreen(onFinished = { showSplash = false })
-        return
-    }
 
     LaunchedEffect(Unit) {
         attemptAutoSignIn(

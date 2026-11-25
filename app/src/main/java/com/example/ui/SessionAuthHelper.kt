@@ -49,6 +49,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -68,6 +69,15 @@ fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
     }
     addAuthStateListener(listener)
     awaitClose { removeAuthStateListener(listener) }
+}
+
+fun isFirebaseConfigured(context: Context): Boolean {
+    if (FirebaseApp.getApps(context).isNotEmpty()) return true
+    return try {
+        FirebaseApp.initializeApp(context.applicationContext) != null
+    } catch (_: Exception) {
+        false
+    }
 }
 
 @SuppressLint("DiscouragedApi")
@@ -91,6 +101,10 @@ fun attemptAutoSignIn(
     onUnauthenticated: () -> Unit,
     scope: CoroutineScope
 ) {
+    if (!isFirebaseConfigured(context)) {
+        onUnauthenticated()
+        return
+    }
     if (Firebase.auth.currentUser != null) {
         onAuthSuccess()
         return
@@ -132,6 +146,10 @@ fun onGoogleSignInClicked(
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit = {}
 ) {
+    if (!isFirebaseConfigured(context)) {
+        onAuthError("Firebase config missing in this APK. Push app/google-services.json to GitHub or export the APK from AI Studio.")
+        return
+    }
     val clientId = resolveWebClientId(context)
     if (clientId == null) {
         onAuthError("Firebase configuration missing: add app/google-services.json in your repo to enable Google Sign-In.")
@@ -179,7 +197,9 @@ fun signOutWithCredentialManager(
             } catch (e: Exception) {
                 Log.w("Auth", "Failed to clear credential state: ${e.message}")
             } finally {
-                Firebase.auth.signOut()
+                if (isFirebaseConfigured(context)) {
+                    Firebase.auth.signOut()
+                }
                 onSignOutComplete()
             }
         }

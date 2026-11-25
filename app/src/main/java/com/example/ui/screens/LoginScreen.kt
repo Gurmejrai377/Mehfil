@@ -63,9 +63,10 @@ import com.example.ui.theme.MehfilSoftMuted
 
 @Composable
 fun LoginScreen(
+    initialError: String? = null,
     onAuthSuccess: () -> Unit
 ) {
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember(initialError) { mutableStateOf(initialError) }
 
     Box(
         modifier = Modifier
