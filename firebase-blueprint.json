@@ -1,0 +1,161 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Private user account settings and PII isolated to owner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the owner." },
+        "displayName": { "type": "string", "description": "User display name." },
+        "email": { "type": "string", "description": "Private Google account email." },
+        "waveId": { "type": "string", "description": "Unique shareable WaveCall handle." },
+        "bio": { "type": "string", "description": "Short status bio." },
+        "online": { "type": "boolean", "description": "Online presence flag." },
+        "lowDataMode": { "type": "boolean", "description": "Prefer low-bandwidth call optimization." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["userId", "displayName", "waveId", "online", "lowDataMode", "createdAt", "updatedAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Publicly discoverable WaveCall profile without PII.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID." },
+        "displayName": { "type": "string", "description": "Public display name." },
+        "waveId": { "type": "string", "description": "Shareable WaveCall handle." },
+        "statusText": { "type": "string", "description": "Current mood or availability status." },
+        "avatarColorHex": { "type": "string", "description": "Hex accent color for avatar." },
+        "online": { "type": "boolean", "description": "Whether user is currently active." },
+        "discoverable": { "type": "boolean", "description": "Whether user appears in WaveCall directory." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["userId", "displayName", "waveId", "statusText", "avatarColorHex", "online", "discoverable", "createdAt", "updatedAt"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "Saved WaveCall contact in user's personal address book.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner UID." },
+        "peerId": { "type": "string", "description": "Contact UID or channel identifier." },
+        "displayName": { "type": "string", "description": "Contact display name." },
+        "waveId": { "type": "string", "description": "Contact WaveCall handle." },
+        "statusText": { "type": "string", "description": "Contact status tagline." },
+        "avatarColorHex": { "type": "string", "description": "Avatar badge hex color." },
+        "online": { "type": "boolean", "description": "Online presence indicator." },
+        "favorite": { "type": "boolean", "description": "Pinned to quick-dial favorites." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["userId", "peerId", "displayName", "waveId", "statusText", "avatarColorHex", "online", "favorite", "createdAt", "updatedAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "1-on-1 or group conversation metadata.",
+      "type": "object",
+      "properties": {
+        "participantUids": { "type": "array", "description": "Bounded list of participant UIDs." },
+        "participantNames": { "type": "object", "description": "Map of UID to display name." },
+        "chatKind": { "type": "string", "enum": ["DIRECT", "GROUP"], "description": "Conversation type." },
+        "title": { "type": "string", "description": "Conversation title." },
+        "lastMessageText": { "type": "string", "description": "Latest message preview." },
+        "lastMessageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "CALL"], "description": "Type of latest message." },
+        "lastMessageSenderId": { "type": "string", "description": "UID of latest sender." },
+        "unreadCount": { "type": "integer", "description": "Unread message count." },
+        "pinned": { "type": "boolean", "description": "Whether conversation is pinned." },
+        "muted": { "type": "boolean", "description": "Whether notifications are muted." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["participantUids", "participantNames", "chatKind", "title", "lastMessageText", "lastMessageType", "lastMessageSenderId", "unreadCount", "pinned", "muted", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message inside a chat conversation.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string", "description": "Parent chat ID." },
+        "senderId": { "type": "string", "description": "Sender UID." },
+        "senderName": { "type": "string", "description": "Sender display name." },
+        "participantUids": { "type": "array", "description": "Denormalized participant UIDs from parent chat." },
+        "messageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "CALL"], "description": "Message payload type." },
+        "text": { "type": "string", "description": "Message text or caption." },
+        "mediaDurationSec": { "type": "integer", "description": "Duration in seconds for voice notes or calls." },
+        "imageDataBase64": { "type": "string", "description": "Optional compact JPEG thumbnail encoded as base64." },
+        "reaction": { "type": "string", "description": "Optional emoji reaction." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["chatId", "senderId", "senderName", "participantUids", "messageType", "text", "mediaDurationSec", "createdAt", "updatedAt"]
+    },
+    "CallRecord": {
+      "title": "CallRecord",
+      "description": "Real-time call signaling session and call history log.",
+      "type": "object",
+      "properties": {
+        "callerId": { "type": "string", "description": "Initiating caller UID." },
+        "callerName": { "type": "string", "description": "Caller display name." },
+        "calleeId": { "type": "string", "description": "Recipient UID or echo channel." },
+        "calleeName": { "type": "string", "description": "Recipient display name." },
+        "participantUids": { "type": "array", "description": "Participant UIDs in call." },
+        "callType": { "type": "string", "enum": ["VIDEO", "VOICE"], "description": "Video or voice call." },
+        "status": { "type": "string", "enum": ["RINGING", "ACTIVE", "ENDED", "MISSED", "DECLINED"], "description": "Call lifecycle state." },
+        "qualityMode": { "type": "string", "enum": ["HD", "LOW_DATA"], "description": "Bandwidth profile." },
+        "durationSeconds": { "type": "integer", "description": "Call duration in seconds." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["callerId", "callerName", "calleeId", "calleeName", "participantUids", "callType", "status", "qualityMode", "durationSeconds", "createdAt", "updatedAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "24-hour style WaveCall status story.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "description": "Author UID." },
+        "ownerName": { "type": "string", "description": "Author display name." },
+        "caption": { "type": "string", "description": "Story status text." },
+        "moodEmoji": { "type": "string", "description": "Featured emoji badge." },
+        "accentHex": { "type": "string", "description": "Card gradient accent hex." },
+        "viewerUids": { "type": "array", "description": "Authorized viewer UIDs including owner." },
+        "viewCount": { "type": "integer", "description": "Number of story views." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on create." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["ownerId", "ownerName", "caption", "moodEmoji", "accentHex", "viewerUids", "viewCount", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Owner-only private user account document."
+    },
+    "/profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Discoverable public profile without PII."
+    },
+    "/users/{userId}/contacts/{contactId}": {
+      "schema": { "$ref": "#/entities/Contact" },
+      "description": "User's personal WaveCall contacts."
+    },
+    "/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/Chat" },
+      "description": "Participant-scoped chat conversations."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Denormalized participant-scoped chat messages."
+    },
+    "/calls/{callId}": {
+      "schema": { "$ref": "#/entities/CallRecord" },
+      "description": "Real-time call signaling and call history logs."
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/Story" },
+      "description": "Viewer-scoped status stories."
+    }
+  }
+}
