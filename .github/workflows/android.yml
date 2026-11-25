@@ -27,12 +27,13 @@ jobs:
         run: |
           if [ ! -f debug.keystore ]; then
             if [ -f debug.keystore.base64 ]; then
-              base64 -d debug.keystore.base64 > debug.keystore
+              tr -d ' \t\r\n' < debug.keystore.base64 | base64 -d > debug.keystore
             elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-              printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+              printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d ' \t\r\n' | base64 -d > debug.keystore
             else
-              echo "::error::Missing debug.keystore.base64! Do not generate a random keystore or Google Sign-In SHA-1 will change every build. Push debug.keystore.base64 from AI Studio."
-              exit 1
+              cat << 'EOF' | tr -d ' \t\r\n' | base64 -d > debug.keystore
+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
+EOF
             fi
           fi
           keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA1|SHA256"
@@ -51,7 +52,7 @@ jobs:
             if [ -n "$GOOGLE_SERVICES_JSON" ]; then
               printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
             elif [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-              printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
+              printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d ' \t\r\n' | base64 -d > app/google-services.json
             else
               echo "::error::app/google-services.json is missing! Copy app/google-services.json into your GitHub repo or add its contents as a repository secret named GOOGLE_SERVICES_JSON."
               exit 1

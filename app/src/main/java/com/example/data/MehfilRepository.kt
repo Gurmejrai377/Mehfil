@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.R
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -20,14 +21,24 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
+private fun resolveMehfilFirestore(context: Context): FirebaseFirestore {
+    val app = FirebaseApp.getInstance()
+    val projectId = app.options.projectId
+    return if (projectId == "gen-lang-client-0466626391") {
+        FirebaseFirestore.getInstance(
+            context.applicationContext.getString(R.string.firestore_database_id)
+        )
+    } else {
+        FirebaseFirestore.getInstance(app)
+    }
+}
+
 class MehfilRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth
 ) {
     constructor(context: Context) : this(
-        FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        )
+        resolveMehfilFirestore(context.applicationContext)
     )
 
     private fun requireUserId(): String =
